@@ -15,6 +15,7 @@ Inspect each resource found in the previous step and look for any finalizers in 
 
 `kubectl edit <resource-type> <resource-name> -n <your-namespace>
 `
+
 In the resource manifest, remove the finalizers block or specific finalizer entries and save the changes. This will allow the resource to be deleted.
 
 3. Remove orphaned resources:
