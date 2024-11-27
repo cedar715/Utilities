@@ -1,0 +1,84 @@
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import org.springframework.integration.support.MessageBuilder;
+import org.springframework.messaging.Message;
+
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.Mockito.*;
+
+class SolaceSyslogOutboundTransformerTest {
+
+    @Mock
+    private ObjectMapper objectMapper;
+
+    @InjectMocks
+    private SolaceSyslogOutboundTransformer transformer;
+
+    @BeforeEach
+    void setUp() {
+        MockitoAnnotations.openMocks(this); // Initialize mocks
+    }
+
+    @Test
+    void testTransform_SuccessfulSerialization() throws JsonProcessingException {
+        // Arrange: Create a mock list of SolaceSyslogEvent messages
+        SolaceSyslogEvent event1 = new SolaceSyslogEvent("event1");
+        SolaceSyslogEvent event2 = new SolaceSyslogEvent("event2");
+
+        Message<?> inputMessage = MessageBuilder.withPayload(
+                List.of(
+                        MessageBuilder.withPayload(event1).build(),
+                        MessageBuilder.withPayload(event2).build()
+                )
+        ).build();
+
+        when(objectMapper.writeValueAsString(event1)).thenReturn("{\"event\":\"event1\"}");
+        when(objectMapper.writeValueAsString(event2)).thenReturn("{\"event\":\"event2\"}");
+
+        // Act: Call the transform method
+        Message<?> resultMessage = transformer.transform(inputMessage);
+
+        // Assert: Verify the payload of the resulting message
+        String expectedPayload = "{\"event\":\"event1\"}" + System.lineSeparator() + "{\"event\":\"event2\"}";
+        assertEquals(expectedPayload, resultMessage.getPayload());
+
+        // Verify interactions with the ObjectMapper
+        verify(objectMapper).writeValueAsString(event1);
+        verify(objectMapper).writeValueAsString(event2);
+    }
+
+    @Test
+    void testTransform_FailedSerialization() throws JsonProcessingException {
+        // Arrange: Create a mock list of SolaceSyslogEvent messages
+        SolaceSyslogEvent event1 = new SolaceSyslogEvent("event1");
+        SolaceSyslogEvent event2 = new SolaceSyslogEvent("event2");
+
+        Message<?> inputMessage = MessageBuilder.withPayload(
+                List.of(
+                        MessageBuilder.withPayload(event1).build(),
+                        MessageBuilder.withPayload(event2).build()
+                )
+        ).build();
+
+        when(objectMapper.writeValueAsString(event1)).thenReturn("{\"event\":\"event1\"}");
+        when(objectMapper.writeValueAsString(event2)).thenThrow(new JsonProcessingException("Serialization error") {});
+
+        // Act: Call the transform method
+        Message<?> resultMessage = transformer.transform(inputMessage);
+
+        // Assert: Verify the payload of the resulting message
+        String expectedPayload = "{\"event\":\"event1\"}" + System.lineSeparator() + "[event2]";
+        assertEquals(expectedPayload, resultMessage.getPayload());
+
+        // Verify interactions with the ObjectMapper
+        verify(objectMapper).writeValueAsString(event1);
+        verify(objectMapper).writeValueAsString(event2);
+    }
+}
