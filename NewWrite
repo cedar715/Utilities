@@ -1,0 +1,21 @@
+public synchronized void write(String batchJson) throws IOException {
+    Path filePath = fileTracker.isEmpty() 
+                    ? generateUniqueFilePath() 
+                    : fileTracker.keySet().iterator().next();
+
+    AtomicLong fileSize = fileTracker.computeIfAbsent(filePath, this::computeFileSize);
+
+    try (BufferedWriter writer = Files.newBufferedWriter(filePath, StandardCharsets.UTF_8, CREATE, APPEND)) {
+        writer.write(batchJson);
+        writer.newLine();
+    }
+
+    fileSize.addAndGet(batchJson.getBytes(StandardCharsets.UTF_8).length + 1);
+
+    if (fileSize.get() > maxFileSizeBytes) {
+        fileTracker.remove(filePath);
+        filePath = generateUniqueFilePath();
+        fileTracker.put(filePath, new AtomicLong(0));
+        log.info("Created a new file: {}", filePath);
+    }
+}
