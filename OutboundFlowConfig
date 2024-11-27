@@ -1,0 +1,119 @@
+@Configuration
+@EnableIntegration
+@Slf4j
+public class OutboundFlowConfig {
+
+    @Value("${app.batch.size:1000}")
+    private int batchSize;
+
+    @Value("${app.batch.timeout:5000}")
+    private long batchTimeout;
+
+    @Value("${app.executor.pool.size:5}")
+    private int executorPoolSize;
+
+    @Value("${app.executor.queue.size:10000}")
+    private int executorQueueSize;
+
+    @Autowired
+    @Qualifier("producerChannel")
+    private MessageChannel producerChannel;
+
+    @Autowired
+    private SyslogEventListTransformer transformer;
+
+    @Autowired
+    private RotatingFileWriterHandler fileWriter;
+
+    @Bean
+    public Executor integrationExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(executorPoolSize);
+        executor.setMaxPoolSize(executorPoolSize);
+        executor.setQueueCapacity(executorQueueSize);
+        executor.setThreadNamePrefix("integration-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(60);
+        executor.initialize();
+        return executor;
+    }
+
+    @Bean
+    public MessageChannel executorChannel() {
+        return new ExecutorChannel(integrationExecutor());
+    }
+
+    @Bean
+    public SimpleMessageStore messageStore() {
+        SimpleMessageStore store = new SimpleMessageStore();
+        store.setTimeoutOnIdle(true);
+        return store;
+    }
+
+    @Bean
+    public AggregatingMessageHandler aggregator() {
+        CorrelationStrategy correlationStrategy = message -> "batchCorrelator";
+        ReleaseStrategy releaseStrategy = group -> group.size() >= batchSize;
+        
+        AggregatingMessageHandler handler = new AggregatingMessageHandler(
+                new SimpleMessageGroupProcessor(),
+                messageStore()
+        );
+        
+        handler.setCorrelationStrategy(correlationStrategy);
+        handler.setReleaseStrategy(releaseStrategy);
+        handler.setGroupTimeoutExpression(new ValueExpression<>(batchTimeout));
+        handler.setExpireGroupsUponCompletion(true);
+        handler.setOutputProcessor(messageGroup -> {
+            Collection<Message<?>> messages = messageGroup.getMessages();
+            return messages.isEmpty() ? null : messages;
+        });
+        
+        return handler;
+    }
+
+    @Bean
+    public MessageHandler fileWritingHandler() {
+        return message -> {
+            try {
+                String content = (String) message.getPayload();
+                fileWriter.write(content);
+            } catch (Exception e) {
+                log.error("Error writing message to file", e);
+                throw new MessageHandlingException(message, "Failed to write message to file", e);
+            }
+        };
+    }
+
+    @Bean
+    public IntegrationFlow fileWriterFlow() {
+        return IntegrationFlow.from(producerChannel)
+                .log(LoggingHandler.Level.DEBUG, message -> 
+                    "Received message batch of size: " + 
+                    ((Collection<?>) message.getPayload()).size())
+                .handle(aggregator())
+                .transform(transformer)
+                .channel(executorChannel())
+                .handle(fileWritingHandler())
+                .log(LoggingHandler.Level.DEBUG, "File write completed")
+                .get();
+    }
+
+    @Bean
+    public ErrorHandler errorHandler() {
+        return new ErrorHandler() {
+            @Override
+            public void handleError(Throwable t) {
+                log.error("Error in integration flow", t);
+                // Add any error notification/alerting logic here
+            }
+        };
+    }
+
+    @PostConstruct
+    public void validateConfiguration() {
+        log.info("Integration flow configured with batch size: {}, timeout: {}ms, executor pool size: {}", 
+                batchSize, batchTimeout, executorPoolSize);
+    }
+}
