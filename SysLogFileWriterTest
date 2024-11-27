@@ -149,4 +149,60 @@ class SysLogFileWriterTest {
         assertTrue(path1.toString().endsWith(".json"));
         assertTrue(path2.toString().endsWith(".json"));
     }
+@Test
+void write_ConcurrentWrites_HandleProperly() throws IOException, InterruptedException {
+    // Arrange
+    writer = new SysLogFileWriter(fileConfig);
+    String content = "test log entry";
+    int threadCount = 10;
+    Thread[] threads = new Thread[threadCount];
+
+    // Act
+    for (int i = 0; i < threadCount; i++) {
+        threads[i] = new Thread(() -> {
+            try {
+                writer.write(content);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        });
+        threads[i].start();
+    }
+
+    for (Thread thread : threads) {
+        thread.join();
+    }
+
+    // Assert
+    Path[] files = Files.list(tempDir).toArray(Path[]::new);
+    assertTrue(files.length > 0);
+    for (Path file : files) {
+        assertTrue(Files.size(file) > 0);
+    }
+}
+
+@Test
+void write_NullContent_ThrowsException() {
+    // Arrange
+    writer = new SysLogFileWriter(fileConfig);
+
+    // Act & Assert
+    assertThrows(NullPointerException.class, () -> writer.write(null));
+}
+
+@Test
+void write_EmptyContent_DoesNotCreateFile() throws IOException {
+    // Arrange
+    writer = new SysLogFileWriter(fileConfig);
+    String content = "";
+
+    // Act
+    writer.write(content);
+
+    // Assert
+    Path[] files = Files.list(tempDir).toArray(Path[]::new);
+    assertEquals(0, files.length);
+}
+
+
 }
