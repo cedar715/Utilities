@@ -1,0 +1,91 @@
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+
+import java.io.IOException;
+import java.nio.file.*;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.util.List;
+import java.util.stream.Collectors;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.when;
+
+class SyslogFileWriterTest {
+
+    private SyslogFileWriter syslogFileWriter;
+
+    @Mock
+    private FileConfig fileConfig;
+
+    @BeforeEach
+    void setUp() throws IOException {
+        MockitoAnnotations.openMocks(this);
+
+        // Mock configuration
+        Path tempDir = Files.createTempDirectory("test-logs");
+        when(fileConfig.getOutputDirectory()).thenReturn(tempDir);
+        when(fileConfig.getMaxFileSize()).thenReturn("10KB"); // Set small max size for easier testing
+
+        syslogFileWriter = new SyslogFileWriter(fileConfig);
+    }
+
+    @Test
+    void testFileCreationAndRotation() throws IOException {
+        // Arrange: Small log entries and batch data
+        String logEntry = "Test log entry";
+        int logEntrySize = logEntry.getBytes().length + 1; // Include newline
+        int entriesPerFile = (int) (10 * 1024 / logEntrySize); // 10KB file limit
+
+        // Act: Write log entries exceeding the size of one file
+        for (int i = 0; i < entriesPerFile + 5; i++) { // Write slightly more than one file's capacity
+            syslogFileWriter.write(logEntry);
+        }
+
+        // Assert: Check for multiple files in the output directory
+        List<Path> files = Files.list(fileConfig.getOutputDirectory()).sorted().collect(Collectors.toList());
+        assertThat(files).hasSize(2); // Ensure 2 files were created
+
+        // Check first file size is within the limit
+        assertThat(Files.size(files.get(0))).isLessThanOrEqualTo(10 * 1024);
+
+        // Check second file contains the remaining entries
+        List<String> secondFileContent = Files.readAllLines(files.get(1));
+        assertThat(secondFileContent).hasSize(5); // 5 remaining log entries
+    }
+
+    @Test
+    void testMultipleRotations() throws IOException {
+        // Arrange: Log entry of fixed size
+        String logEntry = "Rotation test log entry";
+        int logEntrySize = logEntry.getBytes().length + 1; // Include newline
+
+        // Act: Write enough entries to trigger multiple rotations
+        int totalEntries = 50; // Total number of log entries
+        for (int i = 0; i < totalEntries; i++) {
+            syslogFileWriter.write(logEntry);
+        }
+
+        // Assert: Check for multiple files in the output directory
+        List<Path> files = Files.list(fileConfig.getOutputDirectory()).sorted().collect(Collectors.toList());
+        assertThat(files).hasSizeGreaterThan(1); // At least 2 files should be created
+
+        // Verify that each file except the last is full
+        for (int i = 0; i < files.size() - 1; i++) {
+            assertThat(Files.size(files.get(i))).isLessThanOrEqualTo(10 * 1024); // File size limit
+        }
+
+        // Verify the last file contains the remaining log entries
+        long totalWrittenEntries = files.stream()
+                .mapToLong(file -> {
+                    try {
+                        return Files.readAllLines(file).size();
+                    } catch (IOException e) {
+                        return 0;
+                    }
+                })
+                .sum();
+        assertThat(totalWrittenEntries).isEqualTo(totalEntries);
+    }
+}
