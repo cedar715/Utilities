@@ -1,26 +1,10 @@
 long parseSize(String sizeStr) {
-    if (sizeStr == null || sizeStr.isBlank()) {
-        return 1L; // Default case for null/empty input
-    }
-
-    // Remove all digits and convert to uppercase for unit comparison
-    String cleanedInput = sizeStr.replaceAll("[^A-Za-z]", "").toUpperCase();
-    long numericValue;
-    
-    try {
-        // Extract numeric value, defaulting to 1 if no numbers found
-        numericValue = Long.parseLong(sizeStr.replaceAll("[^0-9]", ""));
-    } catch (NumberFormatException e) {
-        return 1L; // Default case for invalid numeric input
-    }
-
-    // Using switch expression (Java 17)
-    long multiplier = switch (cleanedInput) {
-        case "KB" -> 1024L;
-        case "MB" -> 1024L * 1024L;
-        case "GB" -> 1024L * 1024L * 1024L;
-        default -> 1L;
-    };
-
-    return numericValue * multiplier;
+    return (sizeStr == null || sizeStr.isBlank()) ? 1L :
+           Long.parseLong(sizeStr.replaceAll("[^0-9]", "1")) *
+           switch (sizeStr.replaceAll("[^A-Za-z]", "").toUpperCase()) {
+               case "KB" -> 1024L;
+               case "MB" -> 1024L * 1024L;
+               case "GB" -> 1024L * 1024L * 1024L;
+               default -> 1L;
+           };
 }
