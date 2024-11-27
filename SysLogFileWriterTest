@@ -1,0 +1,152 @@
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.mockito.Mock;
+import org.mockito.MockitoAnnotations;
+import java.nio.file.Path;
+import java.nio.file.Files;
+import java.util.concurrent.atomic.AtomicLong;
+import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.*;
+import java.io.IOException;
+
+class SysLogFileWriterTest {
+    @TempDir
+    Path tempDir;
+    
+    @Mock
+    private FileConfig fileConfig;
+    
+    private SysLogFileWriter writer;
+    
+    @BeforeEach
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
+        when(fileConfig.getOutputDirectory()).thenReturn(tempDir);
+        when(fileConfig.getMaxFileSize()).thenReturn("10MB");
+    }
+    
+    @Test
+    void initialization_CreatesOutputDirectory() throws IOException {
+        // Arrange
+        Path customDir = tempDir.resolve("logs");
+        when(fileConfig.getOutputDirectory()).thenReturn(customDir);
+        
+        // Act
+        writer = new SysLogFileWriter(fileConfig);
+        
+        // Assert
+        assertTrue(Files.exists(customDir));
+        assertTrue(Files.isDirectory(customDir));
+    }
+    
+    @Test
+    void initialization_ThrowsException_WhenDirectoryCreationFails() {
+        // Arrange
+        Path invalidPath = Path.of("/invalid/path");
+        when(fileConfig.getOutputDirectory()).thenReturn(invalidPath);
+        
+        // Act & Assert
+        assertThrows(AppException.class, () -> new SysLogFileWriter(fileConfig));
+    }
+    
+    @Test
+    void write_CreatesNewFileAndWritesContent() throws IOException {
+        // Arrange
+        writer = new SysLogFileWriter(fileConfig);
+        String content = "test log entry";
+        
+        // Act
+        writer.write(content);
+        
+        // Assert
+        Path[] files = Files.list(tempDir).toArray(Path[]::new);
+        assertEquals(1, files.length);
+        String writtenContent = Files.readString(files[0]);
+        assertTrue(writtenContent.contains(content));
+        assertTrue(writtenContent.endsWith(System.lineSeparator()));
+    }
+    
+    @Test
+    void write_RotatesFile_WhenSizeExceedsLimit() throws IOException {
+        // Arrange
+        when(fileConfig.getMaxFileSize()).thenReturn("10B"); // Small size to trigger rotation
+        writer = new SysLogFileWriter(fileConfig);
+        String content = "test log entry that exceeds 10 bytes";
+        
+        // Act
+        writer.write(content);
+        writer.write(content); // Should trigger rotation
+        
+        // Assert
+        Path[] files = Files.list(tempDir).toArray(Path[]::new);
+        assertEquals(2, files.length);
+        assertTrue(Files.exists(files[0]));
+        assertTrue(Files.exists(files[1]));
+    }
+    
+    @Test
+    void parseSize_ConvertsValidSizeStrings() {
+        // Arrange
+        writer = new SysLogFileWriter(fileConfig);
+        
+        // Act & Assert
+        assertEquals(1024L, writer.parseSize("1KB"));
+        assertEquals(1024L * 1024L, writer.parseSize("1MB"));
+        assertEquals(1024L * 1024L * 1024L, writer.parseSize("1GB"));
+        assertEquals(1L, writer.parseSize("1")); // Default case
+    }
+    
+    @Test
+    void parseSize_HandlesInvalidInput() {
+        // Arrange
+        writer = new SysLogFileWriter(fileConfig);
+        
+        // Act & Assert
+        assertEquals(1L, writer.parseSize("")); // Default case
+        assertEquals(1L, writer.parseSize("invalid"));
+    }
+    
+    @Test
+    void computeFileSize_ReturnsCorrectSize() throws IOException {
+        // Arrange
+        writer = new SysLogFileWriter(fileConfig);
+        String content = "test content";
+        
+        // Act
+        writer.write(content);
+        Path[] files = Files.list(tempDir).toArray(Path[]::new);
+        AtomicLong fileSize = writer.computeFileSize(files[0]);
+        
+        // Assert
+        assertEquals(Files.size(files[0]), fileSize.get());
+    }
+    
+    @Test
+    void computeFileSize_ReturnsZero_WhenFileDoesNotExist() {
+        // Arrange
+        writer = new SysLogFileWriter(fileConfig);
+        Path nonExistentFile = tempDir.resolve("non-existent.json");
+        
+        // Act
+        AtomicLong fileSize = writer.computeFileSize(nonExistentFile);
+        
+        // Assert
+        assertEquals(0L, fileSize.get());
+    }
+    
+    @Test
+    void generateUniqueFilePath_CreatesUniqueFiles() throws IOException {
+        // Arrange
+        writer = new SysLogFileWriter(fileConfig);
+        
+        // Act
+        Path path1 = writer.generateUniqueFilePath();
+        Path path2 = writer.generateUniqueFilePath();
+        
+        // Assert
+        assertNotEquals(path1, path2);
+        assertTrue(path1.toString().endsWith(".json"));
+        assertTrue(path2.toString().endsWith(".json"));
+    }
+}
