@@ -1,0 +1,85 @@
+@Service
+public class FileCleanupService {
+
+    @Value("${cleanup.limit:100}")
+    private int cleanupLimit;
+
+    @Value("${cleanup.retention.days:7}")
+    private int retentionDays;
+
+    private static final Logger logger = LoggerFactory.getLogger(FileCleanupService.class);
+
+    public void cleanupOldFiles(Path outputDirectory) {
+        logger.info("Cleanup job started at: {}", LocalDateTime.now());
+        try (DirectoryStream<Path> directoryStream = Files.newDirectoryStream(
+                outputDirectory,
+                path -> path.toString().endsWith(".json")
+        )) {
+            int deletedCount = 0;
+            for (Path path : directoryStream) {
+                try {
+                    if (isOlderThan(path, retentionDays) && deletedCount < cleanupLimit) {
+                        deleteFileWithRetry(path, 3);
+                        deletedCount++;
+                    }
+                } catch (IOException e) {
+                    logger.error("Error processing file {}: {}", path, e.getMessage());
+                }
+            }
+            logger.info("Cleanup completed at: {} - Deleted {} files", LocalDateTime.now(), deletedCount);
+        } catch (IOException e) {
+            logger.error("Cleanup failed", e);
+        }
+    }
+
+    private boolean isOlderThan(Path path, int days) {
+        try {
+            FileTime lastModifiedTime = Files.getLastModifiedTime(path);
+            return lastModifiedTime.toInstant().isBefore(Instant.now().minus(days, ChronoUnit.DAYS));
+        } catch (IOException e) {
+            logger.error("Could not get file modification time for {}", path, e);
+            return false;
+        }
+    }
+
+    private void deleteFileWithRetry(Path path, int maxRetries) {
+        int retries = 0;
+        while (retries < maxRetries) {
+            try {
+                Files.delete(path);
+                logger.info("Deleted old file: {}", path);
+                return;
+            } catch (IOException e) {
+                retries++;
+                logger.warn("Retry {}/{} - File deletion failed for {} due to: {}", retries, maxRetries, path, e.getMessage());
+                if (retries >= maxRetries) {
+                    logger.error("Max retries reached. Failed to delete {}", path, e);
+                }
+            }
+        }
+    }
+}
+@Component
+public class CleanupScheduler {
+
+    private final FileCleanupService fileCleanupService;
+
+    @Value("${output.directory.path}")
+    private String outputDirectoryPath;
+
+    @Autowired
+    public CleanupScheduler(FileCleanupService fileCleanupService) {
+        this.fileCleanupService = fileCleanupService;
+    }
+
+    @Scheduled(cron = "${cleanup.cron.expression:0 0 1 * * *}", zone = "UTC")
+    public synchronized void scheduleCleanup() {
+        Path outputDirectory = Paths.get(outputDirectoryPath);
+        fileCleanupService.cleanupOldFiles(outputDirectory);
+    }
+
+    @PreDestroy
+    public void shutdown() {
+        // Your ExecutorService shutdown code here
+    }
+}
