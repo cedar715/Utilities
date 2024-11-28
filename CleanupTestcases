@@ -8,6 +8,9 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.core.env.Environment;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.test.context.junit.jupiter.SpringExtension;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 
 import java.io.IOException;
 import java.nio.file.DirectoryStream;
@@ -31,6 +34,9 @@ public class FileCleanupServiceTest {
     @Mock
     private Environment environment;
 
+    @Mock
+    private MeterRegistry meterRegistry;
+
     @InjectMocks
     private FileCleanupService fileCleanupService;
 
@@ -47,6 +53,7 @@ public class FileCleanupServiceTest {
         // Arrange
         List<Path> testFiles = createTestFiles(5, true);
         mockEnvironmentProperties(100, 7);
+        mockMeterRegistry();
 
         // Act
         fileCleanupService.cleanupOldFiles(tempDirectory);
@@ -62,6 +69,7 @@ public class FileCleanupServiceTest {
         // Arrange
         List<Path> testFiles = createTestFiles(150, true);
         mockEnvironmentProperties(100, 7);
+        mockMeterRegistry();
 
         // Act
         fileCleanupService.cleanupOldFiles(tempDirectory);
@@ -76,6 +84,7 @@ public class FileCleanupServiceTest {
         // Arrange
         createTestFiles(5, false); // All files are created recently
         mockEnvironmentProperties(100, 7);
+        mockMeterRegistry();
 
         // Act
         fileCleanupService.cleanupOldFiles(tempDirectory);
@@ -98,6 +107,7 @@ public class FileCleanupServiceTest {
         when(Files.newDirectoryStream(any(Path.class), any())).thenReturn(directoryStream);
         when(directoryStream.iterator()).thenReturn(files.iterator());
         mockEnvironmentProperties(100, 7);
+        mockMeterRegistry();
 
         // Act and Assert
         assertDoesNotThrow(() -> fileCleanupService.cleanupOldFiles(tempDirectory), "The method should not throw an exception.");
@@ -128,6 +138,29 @@ public class FileCleanupServiceTest {
         assertFalse(result, "The file should be newer than 7 days.");
     }
 
+    @Test
+    public void testDeleteFileWithRetry_SuccessOnFirstTry() throws IOException {
+        // Arrange
+        Path testFile = Files.createTempFile(tempDirectory, "testFile", ".json");
+
+        // Act
+        fileCleanupService.deleteFileWithRetry(testFile);
+
+        // Assert
+        assertFalse(Files.exists(testFile), "File should be deleted successfully on the first try.");
+    }
+
+    @Test
+    public void testDeleteFileWithRetry_SuccessAfterRetries() throws IOException {
+        // Arrange
+        Path testFile = Files.createTempFile(tempDirectory, "testFile", ".json");
+        doThrow(new IOException("Simulated IOException")).doThrow(new IOException("Simulated IOException"))
+                .doNothing().when(Files.class);
+
+        // Act & Assert
+        assertDoesNotThrow(() -> fileCleanupService.deleteFileWithRetry(testFile), "File deletion should succeed after retries.");
+    }
+
     private List<Path> createTestFiles(int count, boolean makeOld) throws IOException {
         List<Path> paths = new ArrayList<>();
         for (int i = 0; i < count; i++) {
@@ -143,5 +176,13 @@ public class FileCleanupServiceTest {
     private void mockEnvironmentProperties(int cleanupLimit, int retentionDays) {
         when(environment.getProperty("cleanup.limit", Integer.class, 100)).thenReturn(cleanupLimit);
         when(environment.getProperty("cleanup.retention.days", Integer.class, 7)).thenReturn(retentionDays);
+    }
+
+    private void mockMeterRegistry() {
+        Counter mockCounter = mock(Counter.class);
+        when(meterRegistry.counter(anyString())).thenReturn(mockCounter);
+        Timer mockTimer = mock(Timer.class);
+        when(meterRegistry.timer(anyString())).thenReturn(mockTimer);
+        when(mockTimer.start()).thenReturn(Timer.start(meterRegistry));
     }
 }
