@@ -7,55 +7,146 @@ import io.micrometer.core.instrument.*;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.nio.file.*;
 import java.time.*;
-import java.util.stream.IntStream;
+import java.util.Arrays;
 import static org.mockito.Mockito.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class FileCleanupServiceTest {
-    // ... other fields remain same ...
+    @Mock
+    private FileConfig fileConfig;
+    
+    private MeterRegistry meterRegistry;
+    
+    @Mock
+    private DirectoryStream<Path> directoryStream;
+    
+    private FileCleanupService cleanupService;
+    
+    @TempDir
+    Path tempDir;
+
+    @BeforeEach
+    void setUp() {
+        MockitoAnnotations.openMocks(this);
+        meterRegistry = new SimpleMeterRegistry();
+        
+        when(fileConfig.getOutputDirectory()).thenReturn(tempDir.toString());
+        when(fileConfig.getDeleteFilePattern()).thenReturn(".tmp");
+        when(fileConfig.getRetentionDays()).thenReturn(7);
+        when(fileConfig.getCleanupLimit()).thenReturn(100);
+        
+        cleanupService = new FileCleanupService(fileConfig, meterRegistry);
+    }
 
     @Test
     void behavior_HandlesRetryMechanism() throws Exception {
         // Arrange
-        Path oldFile = createTempFile("old", ".tmp", -10);
+        Path oldFile = Paths.get(tempDir.toString(), "old.tmp");
         
-        // Mock Files.delete to fail first time
         try (MockedStatic<Files> filesMock = mockStatic(Files.class)) {
+            // Mock DirectoryStream
+            when(directoryStream.iterator())
+                .thenReturn(Arrays.asList(oldFile).iterator());
+                
+            // Mock directory stream creation
+            filesMock.when(() -> Files.newDirectoryStream(
+                any(Path.class), 
+                any(DirectoryStream.Filter.class)))
+                .thenReturn(directoryStream);
+            
+            // Mock getLastModifiedTime for isOlderThan check
+            filesMock.when(() -> Files.getLastModifiedTime(oldFile))
+                .thenReturn(FileTime.from(Instant.now().minus(Duration.ofDays(10))));
+            
+            // Mock delete to fail then succeed
             filesMock.when(() -> Files.delete(oldFile))
                 .thenThrow(new IOException("First attempt fails"))
-                .thenReturn(null); // void method returns null
-            
+                .thenReturn(null);
+
             // Act
             cleanupService.cleanupOldFiles();
 
-            // Verify Files.delete was called twice (initial + 1 retry)
+            // Verify
             filesMock.verify(() -> Files.delete(oldFile), times(2));
+            verify(directoryStream).close();
         }
 
         assertEquals(1, meterRegistry.counter("cleanup.files.deleted").count());
-        verify(meterRegistry, never()).counter("cleanup.errors"); // Should not record error since retry succeeded
     }
 
     @Test
     void behavior_RetryFailsAfterMaxAttempts() throws Exception {
         // Arrange
-        Path oldFile = createTempFile("old", ".tmp", -10);
+        Path oldFile = Paths.get(tempDir.toString(), "old.tmp");
         
-        // Mock Files.delete to always fail
         try (MockedStatic<Files> filesMock = mockStatic(Files.class)) {
+            // Mock DirectoryStream
+            when(directoryStream.iterator())
+                .thenReturn(Arrays.asList(oldFile).iterator());
+                
+            // Mock directory stream creation
+            filesMock.when(() -> Files.newDirectoryStream(
+                any(Path.class), 
+                any(DirectoryStream.Filter.class)))
+                .thenReturn(directoryStream);
+            
+            // Mock getLastModifiedTime for isOlderThan check
+            filesMock.when(() -> Files.getLastModifiedTime(oldFile))
+                .thenReturn(FileTime.from(Instant.now().minus(Duration.ofDays(10))));
+            
+            // Mock delete to always fail
             filesMock.when(() -> Files.delete(oldFile))
                 .thenThrow(new IOException("Delete failed"));
-            
+
             // Act
             cleanupService.cleanupOldFiles();
 
-            // Verify Files.delete was called 3 times (initial + 2 retries)
+            // Verify
             filesMock.verify(() -> Files.delete(oldFile), times(3));
+            verify(directoryStream).close();
         }
 
         assertEquals(0, meterRegistry.counter("cleanup.files.deleted").count());
         assertEquals(1, meterRegistry.counter("cleanup.errors").count());
     }
 
-    // ... rest of the test class remains same ...
+    @Test
+    void happyPath_DeletesOldFiles() throws Exception {
+        // Arrange
+        Path oldFile = Paths.get(tempDir.toString(), "old.tmp");
+        Path newFile = Paths.get(tempDir.toString(), "new.tmp");
+        
+        try (MockedStatic<Files> filesMock = mockStatic(Files.class)) {
+            // Mock DirectoryStream
+            when(directoryStream.iterator())
+                .thenReturn(Arrays.asList(oldFile, newFile).iterator());
+                
+            // Mock directory stream creation
+            filesMock.when(() -> Files.newDirectoryStream(
+                any(Path.class), 
+                any(DirectoryStream.Filter.class)))
+                .thenReturn(directoryStream);
+            
+            // Mock getLastModifiedTime
+            filesMock.when(() -> Files.getLastModifiedTime(oldFile))
+                .thenReturn(FileTime.from(Instant.now().minus(Duration.ofDays(10))));
+            filesMock.when(() -> Files.getLastModifiedTime(newFile))
+                .thenReturn(FileTime.from(Instant.now().minus(Duration.ofDays(1))));
+            
+            // Mock delete
+            filesMock.when(() -> Files.delete(oldFile)).thenReturn(null);
+
+            // Act
+            cleanupService.cleanupOldFiles();
+
+            // Verify
+            filesMock.verify(() -> Files.delete(oldFile), times(1));
+            filesMock.verify(() -> Files.delete(newFile), never());
+            verify(directoryStream).close();
+        }
+
+        assertEquals(1, meterRegistry.counter("cleanup.files.deleted").count());
+    }
+
+    // ... other helper methods ...
 }
