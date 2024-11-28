@@ -1,0 +1,42 @@
+@Scheduled(cron = "${cleanup.cron.expression:0 0 1 * * *}", zone = "UTC") // Run daily at 1 AM (UTC)
+public synchronized void cleanupOldFiles() {
+    logger.info("Cleanup job started at: {}", LocalDateTime.now());
+    try (DirectoryStream<Path> directoryStream = Files.newDirectoryStream(
+            outputDirectory,
+            path -> path.toString().endsWith(".json")
+    )) {
+
+        int deletedCount = 0;
+
+        for (Path path : directoryStream) {
+            try {
+                if (isOlderThan(path, retentionDays) && deletedCount < cleanupLimit) {
+                    deleteFileWithRetry(path, 3);
+                    deletedCount++;
+                }
+            } catch (IOException e) {
+                logger.error("Error processing file {}: {}", path, e.getMessage());
+            }
+        }
+
+        logger.info("Cleanup completed at: {} - Deleted {} files", LocalDateTime.now(), deletedCount);
+    } catch (IOException e) {
+        logger.error("Cleanup failed", e);
+    }
+}
+
+@PreDestroy
+public void shutdown() {
+    executorService.shutdown();
+    try {
+        if (!executorService.awaitTermination(10, TimeUnit.SECONDS)) {
+            executorService.shutdownNow();
+            if (!executorService.awaitTermination(5, TimeUnit.SECONDS)) {
+                logger.error("ExecutorService did not terminate properly after shutdown.");
+            }
+        }
+    } catch (InterruptedException e) {
+        executorService.shutdownNow();
+        Thread.currentThread().interrupt(); // Restore interrupted status
+    }
+}
