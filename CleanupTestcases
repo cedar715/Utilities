@@ -2,6 +2,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mock;
+import org.mockito.MockedStatic;
 import org.mockito.MockitoAnnotations;
 import java.nio.file.Path;
 import java.nio.file.Files;
@@ -39,20 +40,18 @@ class FileCleanupServiceTest {
         when(fileConfig.getRetentionDays()).thenReturn(7);
         when(fileConfig.getCleanupLimit()).thenReturn(100);
         
-        // Fix for the Counter builder setup
         when(meterRegistry.counter("cleanup.errors")).thenReturn(mock(Counter.class));
         
-        // Correct way to mock Counter builder chain
-        Counter deletedFilesCounter = mock(Counter.class);
-        Counter.Builder counterBuilder = mock(Counter.Builder.class);
-        when(Counter.builder("cleanup.files.deleted")).thenReturn(counterBuilder);
-        when(counterBuilder.description(anyString())).thenReturn(counterBuilder);
-        when(counterBuilder.register(meterRegistry)).thenReturn(deletedFilesCounter);
+        // Properly mock the static Counter.builder() method
+        try (MockedStatic<Counter> counterMock = mockStatic(Counter.class)) {
+            counterMock.when(() -> Counter.builder("cleanup.files.deleted")).thenReturn(counterBuilder);
+            when(counterBuilder.description(anyString())).thenReturn(counterBuilder);
+            when(counterBuilder.register(meterRegistry)).thenReturn(deletedFilesCounter);
             
-        cleanupService = new FileCleanupService(fileConfig, meterRegistry);
+            cleanupService = new FileCleanupService(fileConfig, meterRegistry);
+        }
     }
 
-    // Rest of the test methods remain the same...
     @Test
     void cleanupOldFiles_Success() throws Exception {
         // Create test files
@@ -60,16 +59,21 @@ class FileCleanupServiceTest {
         Path newFile = createTempFile("new", ".tmp", -1);
         Path nonMatchingFile = createTempFile("other", ".txt", -10);
 
-        cleanupService.cleanupOldFiles();
+        // Mock static Counter.builder for this test
+        try (MockedStatic<Counter> counterMock = mockStatic(Counter.class)) {
+            counterMock.when(() -> Counter.builder("cleanup.files.deleted")).thenReturn(counterBuilder);
+            
+            cleanupService.cleanupOldFiles();
 
-        assertFalse(Files.exists(oldFile), "Old file should be deleted");
-        assertTrue(Files.exists(newFile), "New file should not be deleted");
-        assertTrue(Files.exists(nonMatchingFile), "Non-matching file should not be deleted");
-        
-        verify(meterRegistry, never()).counter("cleanup.errors");
+            assertFalse(Files.exists(oldFile), "Old file should be deleted");
+            assertTrue(Files.exists(newFile), "New file should not be deleted");
+            assertTrue(Files.exists(nonMatchingFile), "Non-matching file should not be deleted");
+            
+            verify(meterRegistry, never()).counter("cleanup.errors");
+        }
     }
 
-    // Other test methods...
+    // Other test methods should also use MockedStatic...
 
     private Path createTempFile(String prefix, String suffix, int daysOffset) throws Exception {
         Path file = Files.createTempFile(tempDir, prefix, suffix);
