@@ -1,0 +1,147 @@
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.Mockito;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.core.env.Environment;
+import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.test.context.junit.jupiter.SpringExtension;
+
+import java.io.IOException;
+import java.nio.file.DirectoryStream;
+import java.nio.file.FileSystems;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.stream.Stream;
+
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
+
+@ExtendWith({MockitoExtension.class, SpringExtension.class})
+@EnableScheduling
+public class FileCleanupServiceTest {
+
+    @Mock
+    private Environment environment;
+
+    @InjectMocks
+    private FileCleanupService fileCleanupService;
+
+    private Path tempDirectory;
+
+    @BeforeEach
+    public void setUp() throws IOException {
+        // Create a temporary directory for testing
+        tempDirectory = Files.createTempDirectory("testOutputDirectory");
+    }
+
+    @Test
+    public void testCleanupOldFiles_HappyPath() throws IOException {
+        // Arrange
+        List<Path> testFiles = createTestFiles(5, true);
+        mockEnvironmentProperties(100, 7);
+
+        // Act
+        fileCleanupService.cleanupOldFiles(tempDirectory);
+
+        // Assert
+        for (Path path : testFiles) {
+            assertFalse(Files.exists(path), "File should be deleted: " + path);
+        }
+    }
+
+    @Test
+    public void testCleanupOldFiles_LimitCleanup() throws IOException {
+        // Arrange
+        List<Path> testFiles = createTestFiles(150, true);
+        mockEnvironmentProperties(100, 7);
+
+        // Act
+        fileCleanupService.cleanupOldFiles(tempDirectory);
+
+        // Assert
+        long deletedFiles = testFiles.stream().filter(file -> !Files.exists(file)).count();
+        assertEquals(100, deletedFiles, "Only 100 files should have been deleted.");
+    }
+
+    @Test
+    public void testCleanupOldFiles_NoOldFiles() throws IOException {
+        // Arrange
+        createTestFiles(5, false); // All files are created recently
+        mockEnvironmentProperties(100, 7);
+
+        // Act
+        fileCleanupService.cleanupOldFiles(tempDirectory);
+
+        // Assert
+        assertTrue(Files.list(tempDirectory).count() == 5, "No files should be deleted since they are not old.");
+    }
+
+    @Test
+    public void testCleanupOldFiles_HandleIOException() throws IOException {
+        // Arrange
+        Path filePath = mock(Path.class);
+        when(filePath.toString()).thenReturn("mockFile.json");
+        when(filePath.toUri()).thenReturn(tempDirectory.toUri());
+        when(Files.getLastModifiedTime(filePath)).thenThrow(new IOException("Simulated IOException"));
+        List<Path> files = new ArrayList<>();
+        files.add(filePath);
+
+        DirectoryStream<Path> directoryStream = mock(DirectoryStream.class);
+        when(Files.newDirectoryStream(any(Path.class), any())).thenReturn(directoryStream);
+        when(directoryStream.iterator()).thenReturn(files.iterator());
+        mockEnvironmentProperties(100, 7);
+
+        // Act and Assert
+        assertDoesNotThrow(() -> fileCleanupService.cleanupOldFiles(tempDirectory), "The method should not throw an exception.");
+    }
+
+    @Test
+    public void testIsOlderThan_ShouldReturnTrue_ForOldFiles() throws IOException {
+        // Arrange
+        Path oldFile = Files.createTempFile(tempDirectory, "oldFile", ".json");
+        Files.setLastModifiedTime(oldFile, FileSystems.getDefault().getPath(oldFile.toString()), Instant.now().minus(10, ChronoUnit.DAYS).toEpochMilli());
+
+        // Act
+        boolean result = fileCleanupService.isOlderThan(oldFile, 7);
+
+        // Assert
+        assertTrue(result, "The file should be older than 7 days.");
+    }
+
+    @Test
+    public void testIsOlderThan_ShouldReturnFalse_ForRecentFiles() throws IOException {
+        // Arrange
+        Path recentFile = Files.createTempFile(tempDirectory, "recentFile", ".json");
+
+        // Act
+        boolean result = fileCleanupService.isOlderThan(recentFile, 7);
+
+        // Assert
+        assertFalse(result, "The file should be newer than 7 days.");
+    }
+
+    private List<Path> createTestFiles(int count, boolean makeOld) throws IOException {
+        List<Path> paths = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            Path file = Files.createTempFile(tempDirectory, "testFile", ".json");
+            if (makeOld) {
+                Files.setLastModifiedTime(file, FileSystems.getDefault().getPath(file.toString()), Instant.now().minus(10, ChronoUnit.DAYS).toEpochMilli());
+            }
+            paths.add(file);
+        }
+        return paths;
+    }
+
+    private void mockEnvironmentProperties(int cleanupLimit, int retentionDays) {
+        when(environment.getProperty("cleanup.limit", Integer.class, 100)).thenReturn(cleanupLimit);
+        when(environment.getProperty("cleanup.retention.days", Integer.class, 7)).thenReturn(retentionDays);
+    }
+}
