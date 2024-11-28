@@ -11,9 +11,9 @@ import org.springframework.test.context.junit.jupiter.SpringExtension;
 
 import java.io.IOException;
 import java.nio.file.DirectoryStream;
-import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -107,7 +107,7 @@ public class FileCleanupServiceTest {
     public void testIsOlderThan_ShouldReturnTrue_ForOldFiles() throws IOException {
         // Arrange
         Path oldFile = Files.createTempFile(tempDirectory, "oldFile", ".json");
-        Files.setLastModifiedTime(oldFile, FileSystems.getDefault().getPath(oldFile.toString()), Instant.now().minus(10, ChronoUnit.DAYS).toEpochMilli());
+        Files.setLastModifiedTime(oldFile, FileTime.from(Instant.now().minus(10, ChronoUnit.DAYS)));
 
         // Act
         boolean result = fileCleanupService.isOlderThan(oldFile, 7);
@@ -133,7 +133,7 @@ public class FileCleanupServiceTest {
         for (int i = 0; i < count; i++) {
             Path file = Files.createTempFile(tempDirectory, "testFile", ".json");
             if (makeOld) {
-                Files.setLastModifiedTime(file, FileSystems.getDefault().getPath(file.toString()), Instant.now().minus(10, ChronoUnit.DAYS).toEpochMilli());
+                Files.setLastModifiedTime(file, FileTime.from(Instant.now().minus(10, ChronoUnit.DAYS)));
             }
             paths.add(file);
         }
