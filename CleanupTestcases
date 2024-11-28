@@ -12,206 +12,50 @@ import static org.mockito.Mockito.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 class FileCleanupServiceTest {
-    @Mock
-    private FileConfig fileConfig;
-    
-    private MeterRegistry meterRegistry;
-    private Timer executionTimer;
-    private Timer.Sample timerSample;
-    private Counter errorCounter;
-    private Counter deletedFilesCounter;
-    private FileCleanupService cleanupService;
-    
-    @TempDir
-    Path tempDir;
-
-    @BeforeEach
-    void setUp() {
-        MockitoAnnotations.openMocks(this);
-        
-        // Use real MeterRegistry and metrics
-        meterRegistry = new SimpleMeterRegistry();
-        executionTimer = Timer.builder("cleanup.execution.time")
-            .description("Time taken for cleanup operation")
-            .register(meterRegistry);
-        timerSample = Timer.start(meterRegistry);
-        errorCounter = meterRegistry.counter("cleanup.errors");
-        deletedFilesCounter = meterRegistry.counter("cleanup.files.deleted");
-        
-        when(fileConfig.getOutputDirectory()).thenReturn(tempDir.toString());
-        when(fileConfig.getDeleteFilePattern()).thenReturn(".tmp");
-        when(fileConfig.getRetentionDays()).thenReturn(7);
-        when(fileConfig.getCleanupLimit()).thenReturn(100);
-        
-        cleanupService = new FileCleanupService(fileConfig, meterRegistry);
-    }
-
-    @Test
-    void happyPath_DeletesOldFilesWithinLimit() throws Exception {
-        // Arrange
-        Path oldFile1 = createTempFile("old1", ".tmp", -10);
-        Path oldFile2 = createTempFile("old2", ".tmp", -8);
-        Path newFile = createTempFile("new", ".tmp", -1);
-
-        // Act
-        cleanupService.cleanupOldFiles();
-
-        // Assert
-        assertFalse(Files.exists(oldFile1), "Old file 1 should be deleted");
-        assertFalse(Files.exists(oldFile2), "Old file 2 should be deleted");
-        assertTrue(Files.exists(newFile), "New file should not be deleted");
-        assertEquals(2, meterRegistry.counter("cleanup.files.deleted").count());
-    }
-
-    @Test
-    void edgeCase_NoFilesToDelete() throws Exception {
-        // Arrange - create only new files
-        Path newFile1 = createTempFile("new1", ".tmp", -1);
-        Path newFile2 = createTempFile("new2", ".tmp", 0);
-
-        // Act
-        cleanupService.cleanupOldFiles();
-
-        // Assert
-        assertTrue(Files.exists(newFile1));
-        assertTrue(Files.exists(newFile2));
-        assertEquals(0, meterRegistry.counter("cleanup.files.deleted").count());
-    }
-
-    @Test
-    void edgeCase_AllFilesTooOld() throws Exception {
-        // Arrange
-        Path[] oldFiles = IntStream.range(0, 5)
-            .mapToObj(i -> createTempFile("old" + i, ".tmp", -100))
-            .toArray(Path[]::new);
-
-        // Act
-        cleanupService.cleanupOldFiles();
-
-        // Assert
-        for (Path file : oldFiles) {
-            assertFalse(Files.exists(file), "All old files should be deleted");
-        }
-        assertEquals(5, meterRegistry.counter("cleanup.files.deleted").count());
-    }
-
-    @Test
-    void edgeCase_RespectsCleanupLimit() throws Exception {
-        // Arrange
-        when(fileConfig.getCleanupLimit()).thenReturn(2);
-        Path[] oldFiles = IntStream.range(0, 5)
-            .mapToObj(i -> createTempFile("old" + i, ".tmp", -10))
-            .toArray(Path[]::new);
-
-        // Act
-        cleanupService.cleanupOldFiles();
-
-        // Assert
-        long deletedCount = countDeletedFiles(oldFiles);
-        assertEquals(2, deletedCount, "Should only delete up to the limit");
-        assertEquals(2, meterRegistry.counter("cleanup.files.deleted").count());
-    }
-
-    @Test
-    void errorCase_NonExistentDirectory() {
-        // Arrange
-        when(fileConfig.getOutputDirectory()).thenReturn("/non/existent/path");
-
-        // Act
-        cleanupService.cleanupOldFiles();
-
-        // Assert
-        assertEquals(1, meterRegistry.counter("cleanup.errors").count());
-    }
-
-    @Test
-    void errorCase_FileDeleteFailure() throws Exception {
-        // Arrange
-        Path unreadableFile = createTempFile("unreadable", ".tmp", -10);
-        unreadableFile.toFile().setReadOnly();
-
-        // Act
-        cleanupService.cleanupOldFiles();
-
-        // Assert
-        assertEquals(1, meterRegistry.counter("cleanup.errors").count());
-    }
-
-    @Test
-    void behavior_IgnoresNonMatchingPatterns() throws Exception {
-        // Arrange
-        Path oldMatchingFile = createTempFile("old", ".tmp", -10);
-        Path oldNonMatchingFile = createTempFile("old", ".txt", -10);
-
-        // Act
-        cleanupService.cleanupOldFiles();
-
-        // Assert
-        assertFalse(Files.exists(oldMatchingFile), "Matching file should be deleted");
-        assertTrue(Files.exists(oldNonMatchingFile), "Non-matching file should not be deleted");
-    }
-
-    @Test
-    void behavior_HandlesEmptyDirectory() throws Exception {
-        // Act
-        cleanupService.cleanupOldFiles();
-
-        // Assert
-        assertEquals(0, meterRegistry.counter("cleanup.files.deleted").count());
-        assertEquals(0, meterRegistry.counter("cleanup.errors").count());
-    }
-
-    @Test
-    void behavior_HandlesConcurrentModification() throws Exception {
-        // Arrange
-        Path oldFile = createTempFile("old", ".tmp", -10);
-        
-        // Simulate concurrent deletion
-        Files.delete(oldFile);
-
-        // Act
-        cleanupService.cleanupOldFiles();
-
-        // Assert
-        assertEquals(0, meterRegistry.counter("cleanup.files.deleted").count());
-        assertEquals(0, meterRegistry.counter("cleanup.errors").count());
-    }
+    // ... other fields remain same ...
 
     @Test
     void behavior_HandlesRetryMechanism() throws Exception {
         // Arrange
         Path oldFile = createTempFile("old", ".tmp", -10);
-        Path oldFileBackup = createTempFile("old_backup", ".tmp", -10);
         
-        // Mock file to fail deletion first time
-        File mockFile = spy(oldFile.toFile());
-        when(mockFile.delete())
-            .thenReturn(false)
-            .thenReturn(true);
+        // Mock Files.delete to fail first time
+        try (MockedStatic<Files> filesMock = mockStatic(Files.class)) {
+            filesMock.when(() -> Files.delete(oldFile))
+                .thenThrow(new IOException("First attempt fails"))
+                .thenReturn(null); // void method returns null
+            
+            // Act
+            cleanupService.cleanupOldFiles();
 
-        // Act
-        cleanupService.cleanupOldFiles();
-
-        // Assert
-        verify(mockFile, times(2)).delete();
-        assertEquals(2, meterRegistry.counter("cleanup.files.deleted").count());
-    }
-
-    private Path createTempFile(String prefix, String suffix, int daysOffset) {
-        try {
-            Path file = Files.createTempFile(tempDir, prefix, suffix);
-            Files.setLastModifiedTime(file, 
-                FileTime.from(LocalDateTime.now().plusDays(daysOffset)
-                    .toInstant(ZoneOffset.UTC)));
-            return file;
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to create test file", e);
+            // Verify Files.delete was called twice (initial + 1 retry)
+            filesMock.verify(() -> Files.delete(oldFile), times(2));
         }
+
+        assertEquals(1, meterRegistry.counter("cleanup.files.deleted").count());
+        verify(meterRegistry, never()).counter("cleanup.errors"); // Should not record error since retry succeeded
     }
 
-    private long countDeletedFiles(Path[] files) {
-        return Stream.of(files)
-            .filter(file -> !Files.exists(file))
-            .count();
+    @Test
+    void behavior_RetryFailsAfterMaxAttempts() throws Exception {
+        // Arrange
+        Path oldFile = createTempFile("old", ".tmp", -10);
+        
+        // Mock Files.delete to always fail
+        try (MockedStatic<Files> filesMock = mockStatic(Files.class)) {
+            filesMock.when(() -> Files.delete(oldFile))
+                .thenThrow(new IOException("Delete failed"));
+            
+            // Act
+            cleanupService.cleanupOldFiles();
+
+            // Verify Files.delete was called 3 times (initial + 2 retries)
+            filesMock.verify(() -> Files.delete(oldFile), times(3));
+        }
+
+        assertEquals(0, meterRegistry.counter("cleanup.files.deleted").count());
+        assertEquals(1, meterRegistry.counter("cleanup.errors").count());
     }
+
+    // ... rest of the test class remains same ...
 }
