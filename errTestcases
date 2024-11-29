@@ -1,0 +1,122 @@
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import static org.mockito.Mockito.*;
+import static org.junit.jupiter.api.Assertions.*;
+
+@ExtendWith(MockitoExtension.class)
+class ErrorHandlingFlowTest {
+    
+    @Mock
+    private Message message;
+    
+    @Mock
+    private Logger log;
+    
+    private IntegrationFlow errorHandlingFlow;
+    
+    @BeforeEach
+    void setUp() {
+        // Initialize your error handling flow
+        errorHandlingFlow = new YourClass().errorHandlingFlow();
+        // Inject mocked logger
+        ReflectionTestUtils.setField(LoggerFactory.class, "logger", log);
+    }
+    
+    @Test
+    void whenMessageHandlingException_thenLogUnderlyingCause() {
+        // Arrange
+        RuntimeException originalCause = new RuntimeException("Original error");
+        MessageHandlingException wrappedException = new MessageHandlingException(message, "Wrapped error", originalCause);
+        when(message.getPayload()).thenReturn(wrappedException);
+        
+        // Act
+        errorHandlingFlow.handle(message);
+        
+        // Assert
+        verify(log).error(eq("Unhandled exception during message processing: {}"), 
+            eq("Original error"), eq(originalCause));
+    }
+    
+    @Test
+    void whenOutOfMemoryError_thenThrowError() {
+        // Arrange
+        OutOfMemoryError oomError = new OutOfMemoryError("Original OOM");
+        when(message.getPayload()).thenReturn(oomError);
+        
+        // Act & Assert
+        OutOfMemoryError thrown = assertThrows(OutOfMemoryError.class, () -> 
+            errorHandlingFlow.handle(message));
+        assertEquals("Heap maxed out! Application will stop.", thrown.getMessage());
+    }
+    
+    @Test
+    void whenWrappedOutOfMemoryError_thenThrowError() {
+        // Arrange
+        OutOfMemoryError oomError = new OutOfMemoryError("Original OOM");
+        MessageHandlingException wrappedException = new MessageHandlingException(message, "Wrapped error", oomError);
+        when(message.getPayload()).thenReturn(wrappedException);
+        
+        // Act & Assert
+        OutOfMemoryError thrown = assertThrows(OutOfMemoryError.class, () -> 
+            errorHandlingFlow.handle(message));
+        assertEquals("Heap maxed out! Application will stop.", thrown.getMessage());
+    }
+    
+    @Test
+    void whenRegularThrowable_thenLogError() {
+        // Arrange
+        IllegalArgumentException exception = new IllegalArgumentException("Invalid argument");
+        when(message.getPayload()).thenReturn(exception);
+        
+        // Act
+        errorHandlingFlow.handle(message);
+        
+        // Assert
+        verify(log).error(eq("Unhandled exception during message processing: {}"), 
+            eq("Invalid argument"), eq(exception));
+    }
+    
+    @Test
+    void whenNonThrowablePayload_thenLogUnexpectedType() {
+        // Arrange
+        String unexpectedPayload = "Unexpected string payload";
+        when(message.getPayload()).thenReturn(unexpectedPayload);
+        
+        // Act
+        errorHandlingFlow.handle(message);
+        
+        // Assert
+        verify(log).error(eq("Unexpected payload type during message processing: {}"), 
+            eq(unexpectedPayload));
+    }
+    
+    @Test
+    void whenNullPayload_thenLogUnexpectedType() {
+        // Arrange
+        when(message.getPayload()).thenReturn(null);
+        
+        // Act
+        errorHandlingFlow.handle(message);
+        
+        // Assert
+        verify(log).error(eq("Unexpected payload type during message processing: {}"), 
+            isNull());
+    }
+    
+    @Test
+    void testIntegrationFlowConfiguration() {
+        // Arrange
+        RuntimeException testException = new RuntimeException("Test error");
+        when(message.getPayload()).thenReturn(testException);
+        
+        // Act
+        IntegrationFlow flow = errorHandlingFlow();
+        
+        // Assert
+        assertNotNull(flow);
+        verify(log).error(contains("Error occurred in the flow"), any());
+    }
+}
