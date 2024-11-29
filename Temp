@@ -1,0 +1,30 @@
+private static MessageHandler handleErrors() {
+    return message -> {
+        Object payload = message.getPayload();
+        Logger logger = LoggerFactory.getLogger("ErrorLogger");  // Create logger once
+        
+        try {
+            if (payload instanceof Throwable throwable) {
+                // Unwrap the cause if it's a handling exception
+                Throwable cause = (payload instanceof MessageHandlingException) 
+                    ? ((MessageHandlingException) payload).getCause() 
+                    : throwable;
+                
+                // Handle OOM specially
+                if (cause instanceof OutOfMemoryError) {
+                    throw new OutOfMemoryError("Heap maxed out! Application will stop.");
+                }
+                
+                // Log all other exceptions with their stack traces
+                logger.error("Unhandled exception during message processing: {}", 
+                    cause.getMessage(), cause);
+            } else {
+                // Log unexpected payload types
+                logger.error("Unexpected payload type during message processing: {}", payload);
+            }
+        } catch (OutOfMemoryError oom) {
+            // Ensure OOM gets thrown even if it happens during logging
+            throw oom;
+        }
+    };
+}
