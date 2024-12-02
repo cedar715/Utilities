@@ -1,0 +1,60 @@
+# roles/solace-collector/defaults/main.yml
+---
+# Default configurations that are common across environments
+container_name: solace-syslog-collector
+container_image: YOUR_REGISTRY/solace-syslog-collector:latest
+container_state: started
+data_directory: /opt/solace/data
+log_directory: /opt/solace/logs
+
+# Application configs
+app_port: 8080
+syslog_port: 5141
+max_message_size: 8192
+codec_type: lf
+core_pool_size: 10
+max_pool_size: 10          # Default lower value, override in prod
+channel_queue_size: 5000   # Default lower value, override in prod
+error_queue_size: 100
+thread_queue_size: 5000
+keep_alive_time: 60
+
+# File configurations
+output_directory: /data/syslog
+file_prefix: syslog
+max_file_size: 100MB
+batch_size: 100
+batch_timeout: 5000
+retention_days: 3          # Default lower value, override in prod
+delete_file_pattern: "*.json"
+cleanup_limit: 100
+cleanup_schedule: "0 0 1 * * *"
+cleanup_timezone: "UTC"
+
+# Logging levels
+logging_levels:
+  com.foo.bar.solace: INFO
+  org.springframework.integration: INFO
+  org.springframework.integration.ip: INFO
+  org.springframework.messaging: INFO
+
+# inventories/prod/group_vars/collector_hosts.yml
+---
+# Override only production-specific values
+environment: production
+max_pool_size: 20
+channel_queue_size: 10000
+retention_days: 7
+logging_levels:
+  com.foo.bar.solace: WARN
+  org.springframework.integration: WARN
+
+# inventories/nonp/group_vars/collector_hosts.yml
+---
+# Override only non-prod specific values
+environment: nonprod
+# Using defaults from roles/defaults/main.yml
+# Can override specific values if needed
+logging_levels:
+  com.foo.bar.solace: DEBUG
+  org.springframework.integration: INFO
