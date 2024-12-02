@@ -1,1 +1,15 @@
+# roles/solace-collector/templates/container-service.j2
+[Unit]
+Description=Solace Syslog Collector Container
+After=network.target
 
+[Service]
+Type=simple
+Restart=always
+ExecStartPre=-/usr/bin/podman stop {{ container_name }}
+ExecStartPre=-/usr/bin/podman rm {{ container_name }}
+ExecStart=/usr/bin/podman start -a {{ container_name }}
+ExecStop=/usr/bin/podman stop -t 10 {{ container_name }}
+
+[Install]
+WantedBy=multi-user.target
