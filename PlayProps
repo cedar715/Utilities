@@ -1,11 +1,11 @@
-# roles/solace-collector/defaults/main.yml
+# roles/myapp-collector/defaults/main.yml
 ---
 # Default configurations that are common across environments
-container_name: solace-syslog-collector
-container_image: YOUR_REGISTRY/solace-syslog-collector:latest
+container_name: myapp-syslog-collector
+container_image: YOUR_REGISTRY/myapp-syslog-collector:latest
 container_state: started
-data_directory: /opt/solace/data
-log_directory: /opt/solace/logs
+data_directory: /opt/myapp/data
+log_directory: /opt/myapp/logs
 
 # Application configs
 app_port: 8080
@@ -33,7 +33,7 @@ cleanup_timezone: "UTC"
 
 # Logging levels
 logging_levels:
-  com.foo.bar.solace: INFO
+  com.foo.bar.myapp: INFO
   org.springframework.integration: INFO
   org.springframework.integration.ip: INFO
   org.springframework.messaging: INFO
@@ -46,7 +46,7 @@ max_pool_size: 20
 channel_queue_size: 10000
 retention_days: 7
 logging_levels:
-  com.foo.bar.solace: WARN
+  com.foo.bar.myapp: WARN
   org.springframework.integration: WARN
 
 # inventories/nonp/group_vars/collector_hosts.yml
@@ -56,5 +56,5 @@ environment: nonprod
 # Using defaults from roles/defaults/main.yml
 # Can override specific values if needed
 logging_levels:
-  com.foo.bar.solace: DEBUG
+  com.foo.bar.myapp: DEBUG
   org.springframework.integration: INFO
