@@ -1,60 +1,122 @@
-# roles/myapp-collector/defaults/main.yml
+# inventory/production/hosts.yml
 ---
-# Default configurations that are common across environments
+all:
+  children:
+    collector_hosts:
+      hosts:
+        collector01:
+          ansible_host: YOUR_HOST_IP
+          ansible_user: YOUR_SSH_USER
+
+# inventory/production/group_vars/collector_hosts.yml
+---
 container_name: myapp-syslog-collector
 container_image: YOUR_REGISTRY/myapp-syslog-collector:latest
 container_state: started
 data_directory: /opt/myapp/data
 log_directory: /opt/myapp/logs
 
-# Application configs
+# roles/myapp-collector/defaults/main.yml
+---
 app_port: 8080
 syslog_port: 5141
 max_message_size: 8192
-codec_type: lf
 core_pool_size: 10
-max_pool_size: 10          # Default lower value, override in prod
-channel_queue_size: 5000   # Default lower value, override in prod
+max_pool_size: 20
+channel_queue_size: 10000
 error_queue_size: 100
 thread_queue_size: 5000
 keep_alive_time: 60
-
-# File configurations
 output_directory: /data/syslog
-file_prefix: syslog
 max_file_size: 100MB
 batch_size: 100
 batch_timeout: 5000
-retention_days: 3          # Default lower value, override in prod
-delete_file_pattern: "*.json"
-cleanup_limit: 100
-cleanup_schedule: "0 0 1 * * *"
-cleanup_timezone: "UTC"
-
-# Logging levels
-logging_levels:
-  com.foo.bar.myapp: INFO
-  org.springframework.integration: INFO
-  org.springframework.integration.ip: INFO
-  org.springframework.messaging: INFO
-
-# inventories/prod/group_vars/collector_hosts.yml
----
-# Override only production-specific values
-environment: production
-max_pool_size: 20
-channel_queue_size: 10000
 retention_days: 7
-logging_levels:
-  com.foo.bar.myapp: WARN
-  org.springframework.integration: WARN
+cleanup_schedule: "0 0 1 * * *"
+timezone: "UTC"
 
-# inventories/nonp/group_vars/collector_hosts.yml
+# roles/myapp-collector/tasks/main.yml
 ---
-# Override only non-prod specific values
-environment: nonprod
-# Using defaults from roles/defaults/main.yml
-# Can override specific values if needed
-logging_levels:
-  com.foo.bar.myapp: DEBUG
-  org.springframework.integration: INFO
+- name: Ensure required directories exist
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "{{ data_directory }}"
+    - "{{ log_directory }}"
+
+- name: Create container systemd service
+  template:
+    src: container-service.j2
+    dest: /etc/systemd/system/{{ container_name }}.service
+    mode: '0644'
+  notify: Reload systemd
+
+- name: Pull container image
+  containers.podman.podman_image:
+    name: "{{ container_image }}"
+    force: yes
+    state: present
+
+- name: Deploy container
+  containers.podman.podman_container:
+    name: "{{ container_name }}"
+    image: "{{ container_image }}"
+    state: "{{ container_state }}"
+    restart_policy: always
+    ports:
+      - "{{ app_port }}:8080"
+      - "{{ syslog_port }}:5141"
+    volumes:
+      - "{{ data_directory }}:/data:Z"
+      - "{{ log_directory }}:/logs:Z"
+    env:
+      SPRING_APPLICATION_NAME: "myapp-otel-collector"
+      LOGGING_LEVEL_COM_foo_bar_myapp: "INFO"
+      LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_INTEGRATION: "INFO"
+      SYSLOG_PORT: "{{ syslog_port }}"
+      SYSLOG_MAX_MESSAGE_SIZE: "{{ max_message_size }}"
+      SYSLOG_CORE_POOL_SIZE: "{{ core_pool_size }}"
+      SYSLOG_MAX_POOL_SIZE: "{{ max_pool_size }}"
+      SYSLOG_CHANNEL_QUEUE_SIZE: "{{ channel_queue_size }}"
+      SYSLOG_ERROR_QUEUE_SIZE: "{{ error_queue_size }}"
+      SYSLOG_THREAD_QUEUE_SIZE: "{{ thread_queue_size }}"
+      SYSLOG_KEEP_ALIVE_TIME: "{{ keep_alive_time }}"
+      FILE_OUTPUT_DIRECTORY: "{{ output_directory }}"
+      FILE_MAX_FILE_SIZE: "{{ max_file_size }}"
+      FILE_BATCH_SIZE: "{{ batch_size }}"
+      FILE_BATCH_TIMEOUT: "{{ batch_timeout }}"
+      FILE_RETENTION_DAYS: "{{ retention_days }}"
+      FILE_CLEANUP_SCHEDULE: "{{ cleanup_schedule }}"
+      TZ: "{{ timezone }}"
+
+# roles/myapp-collector/handlers/main.yml
+---
+- name: Reload systemd
+  systemd:
+    daemon_reload: yes
+
+# roles/myapp-collector/templates/container-service.j2
+[Unit]
+Description=myapp Syslog Collector Container
+After=network.target
+
+[Service]
+Type=simple
+Restart=always
+ExecStartPre=-/usr/bin/podman stop {{ container_name }}
+ExecStartPre=-/usr/bin/podman rm {{ container_name }}
+ExecStart=/usr/bin/podman start -a {{ container_name }}
+ExecStop=/usr/bin/podman stop -t 10 {{ container_name }}
+
+[Install]
+WantedBy=multi-user.target
+
+# site-prod.yml
+---
+- name: Deploy myapp Syslog Collector
+  hosts: collector_hosts
+  become: true
+  roles:
+    - myapp-collector
