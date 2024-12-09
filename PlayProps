@@ -1,25 +1,17 @@
 ---
-# tasks/reload_config.yml
+- name: Redeploy Syslog Collector Podman Container
+  hosts: all
+  tasks:
+    - name: Copy updated environment file
+      template:
+        src: env_file.j2
+        dest: /home/{{ solace_local_service_user }}/etc_solace/env
+        owner: solace
+        group: solace
+        mode: 0644
+      notify:
+        - restart syslog collector
 
-- name: Stop the container using the CID file
-  ansible.builtin.shell: |
-    if [ -f /run/{{ container_name }}.cid ]; then
-      /usr/bin/podman stop -t 10 $(cat /run/{{ container_name }}.cid) || true
-      /usr/bin/podman rm $(cat /run/{{ container_name }}.cid) || true
-    fi
-  become: yes
-
-- name: Restart the systemd service
-  ansible.builtin.systemd:
-    name: "{{ container_name }}.service"
-    state: restarted
-  become: yes
-
-- name: Verify the container is running
-  ansible.builtin.command: podman ps --filter "name={{ container_name }}"
-  register: podman_status
-  become: yes
-
-- name: Print container status
-  ansible.builtin.debug:
-    msg: "{{ podman_status.stdout }}"
+  handlers:
+    - name: restart syslog collector
+      include_tasks: roles/syslog_collector/tasks/reload_config.yml
