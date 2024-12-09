@@ -1,38 +1,25 @@
-[Unit]
-Description=Syslog Collector Container
-After=network.target
-Requires=network.target
+---
+# tasks/reload_config.yml
 
-[Service]
-Type=exec
-Restart=always
-RestartSec=5
-TimeoutStartSec=60
-TimeoutStopSec=30
+- name: Stop the container using the CID file
+  ansible.builtin.shell: |
+    if [ -f /run/{{ container_name }}.cid ]; then
+      /usr/bin/podman stop -t 10 $(cat /run/{{ container_name }}.cid) || true
+      /usr/bin/podman rm $(cat /run/{{ container_name }}.cid) || true
+    fi
+  become: yes
 
-# Clean up any existing container
-ExecStartPre=/bin/bash -c '/usr/bin/podman rm -f $(cat %t/%N.cid) 2>/dev/null || true'
+- name: Restart the systemd service
+  ansible.builtin.systemd:
+    name: "{{ container_name }}.service"
+    state: restarted
+  become: yes
 
-# Start the container and store CID
-ExecStart=/usr/bin/podman run \
-    --cidfile=%t/%N.cid \
-    --name {{ container_name }} \
-    --user ${USER_ID}:${GROUP_ID} \
-    -p "{{ app_port }}:8080" \
-    -p "{{ syslog_port }}:5141" \
-    --env-file=/home/{{ solace_local_service_user }}/etc_solace/env \
-    -v "{{ host_dir }}:{{ container_path }}:Z,U" \
-    {{ container_image }}
+- name: Verify the container is running
+  ansible.builtin.command: podman ps --filter "name={{ container_name }}"
+  register: podman_status
+  become: yes
 
-# Stop and remove the container using the CID file
-ExecStop=/bin/bash -c '/usr/bin/podman stop -t 10 $(cat %t/%N.cid) && /usr/bin/podman rm $(cat %t/%N.cid)'
-
-# Remove the CID file
-ExecStopPost=/bin/bash -c 'rm -f %t/%N.cid'
-
-User=solace
-Group=solace
-
-[Install]
-WantedBy=multi-user.target
-
+- name: Print container status
+  ansible.builtin.debug:
+    msg: "{{ podman_status.stdout }}"
