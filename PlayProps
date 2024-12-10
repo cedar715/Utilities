@@ -1,14 +1,8 @@
-- name: Check if port 5141 is open
-  ansible.builtin.wait_for:
-    port: 5141
-    state: started
-    timeout: 10
-    host: "{{ inventory_hostname }}"
-  delegate_to: localhost
-  register: port_check
+- name: Check directory contents with ls
+  ansible.builtin.command: ls -l /path/to/directory
+  register: ls_output
   ignore_errors: true
 
-- name: Display port status
+- name: Display directory contents
   debug:
-    msg: >
-      Port 5141 is {{ 'open' if port_check.state == 'started' else 'closed' }} on {{ inventory_hostname }}.
+    msg: "{{ ls_output.stdout }}"
