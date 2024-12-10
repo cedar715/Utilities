@@ -11,3 +11,13 @@
       {% else %}
       The symlink does not exist or is not a valid symlink.
       {% endif %}
+
+- name: Check if symlink exists
+  stat:
+    path: /path/to/symlink
+  register: symlink_stat
+
+- name: Do something if symlink exists
+  debug:
+    msg: "Symlink exists and points to {{ symlink_stat.stat.lnk_source }}"
+  when: symlink_stat.stat.islnk is defined and symlink_stat.stat.islnk
