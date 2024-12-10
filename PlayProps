@@ -1,8 +1,13 @@
-- name: Check directory contents with ls
-  ansible.builtin.command: ls -l /path/to/directory
-  register: ls_output
-  ignore_errors: true
+- name: Check if the symlink exists
+  ansible.builtin.stat:
+    path: /path/to/symlink
+  register: symlink_stat
 
-- name: Display directory contents
+- name: Display symlink information
   debug:
-    msg: "{{ ls_output.stdout }}"
+    msg: >
+      {% if symlink_stat.stat.islnk %}
+      The symlink exists and points to: {{ symlink_stat.stat.lnk_target }}
+      {% else %}
+      The symlink does not exist or is not a valid symlink.
+      {% endif %}
