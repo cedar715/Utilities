@@ -1,4 +1,14 @@
-- name: Get the previous exited container ID
-  command: podman ps -a --filter "name={{ container_name }}" --format "{{ '{{' }}.ID {{' '}} .Status{{ '}}' }}" | grep Exited | awk '{print $1}' | head -n 1
-  register: previous_container
-  become: yes
+- name: Check if port 5141 is open
+  ansible.builtin.wait_for:
+    port: 5141
+    state: started
+    timeout: 10
+    host: "{{ inventory_hostname }}"
+  delegate_to: localhost
+  register: port_check
+  ignore_errors: true
+
+- name: Display port status
+  debug:
+    msg: >
+      Port 5141 is {{ 'open' if port_check.state == 'started' else 'closed' }} on {{ inventory_hostname }}.
