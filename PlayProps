@@ -1,23 +1,9 @@
-- name: Check if the symlink exists
-  ansible.builtin.stat:
-    path: /path/to/symlink
-  register: symlink_stat
+- name: Check the status of elastic-agent service
+  ansible.builtin.shell: "systemctl status elastic-agent"
+  register: elastic_agent_status
+  ignore_errors: yes
 
-- name: Display symlink information
-  debug:
-    msg: >
-      {% if symlink_stat.stat.islnk %}
-      The symlink exists and points to: {{ symlink_stat.stat.lnk_target }}
-      {% else %}
-      The symlink does not exist or is not a valid symlink.
-      {% endif %}
+- name: Display elastic-agent service status
+  ansible.builtin.debug:
+    msg: "{{ elastic_agent_status.stdout }}"
 
-- name: Check if symlink exists
-  stat:
-    path: /path/to/symlink
-  register: symlink_stat
-
-- name: Do something if symlink exists
-  debug:
-    msg: "Symlink exists and points to {{ symlink_stat.stat.lnk_source }}"
-  when: symlink_stat.stat.islnk is defined and symlink_stat.stat.islnk
