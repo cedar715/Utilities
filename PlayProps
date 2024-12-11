@@ -1,9 +1,12 @@
 - name: Check the status of elastic-agent service
-  ansible.builtin.shell: "systemctl status elastic-agent"
+  ansible.builtin.shell: "systemctl is-active elastic-agent"
   register: elastic_agent_status
-  ignore_errors: yes
+  failed_when: elastic_agent_status.rc != 0
+  changed_when: false
 
-- name: Display elastic-agent service status
-  ansible.builtin.debug:
-    msg: "{{ elastic_agent_status.stdout }}"
-
+- name: Assert elastic-agent service is active
+  ansible.builtin.assert:
+    that:
+      - elastic_agent_status.stdout == "active"
+    fail_msg: "The elastic-agent service is not running."
+    success_msg: "The elastic-agent service is running as expected."
