@@ -1,34 +1,3 @@
-- name: Clean up and reset a failed --user systemd service
-  hosts: all
-  become: false  # Do not use root, as this is a --user service
-  tasks:
-    - name: Perform all cleanup steps for the --user service
-      ansible.builtin.shell: |
-        # Check service status
-        systemctl --user status your-service.service || true
-
-        # Stop the service
-        systemctl --user stop your-service.service || true
-
-        # Reset failed state
-        systemctl --user reset-failed your-service.service || true
-
-        # Remove temporary files
-        rm -rf /run/user/$(id -u)/your-service/ || true
-
-        # Reload systemd manager configuration
-        systemctl --user daemon-reload || true
-
-        # Start the service
-        systemctl --user start your-service.service || true
-
-        # Enable the service at login (optional)
-        systemctl --user enable your-service.service || true
-      environment:
-        XDG_RUNTIME_DIR: /run/user/{{ ansible_uid }}
-      register: combined_output
-      ignore_errors: true
-
-    - name: Display output from all steps
-      ansible.builtin.debug:
-        var: combined_output.stdout
+- name: Kill failed soltel-log-collector service process
+  ansible.builtin.command: pkill -f "soltel-log-collector"
+  ignore_errors: yes  # In case the process is already gone
