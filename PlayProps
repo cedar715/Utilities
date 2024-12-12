@@ -1,28 +1,33 @@
 ---
-- name: Clean up and reset a failed systemd service
+- name: Clean up and reset a failed --user systemd service
   hosts: all
-  become: true
+  become: false  # Ensure tasks run as the target user
   tasks:
 
-    - name: Check the status of the service
+    - name: Check the status of the --user service
       ansible.builtin.shell:
-        cmd: systemctl status your-service.service
+        cmd: systemctl --user status your-service.service
+        environment:
+          XDG_RUNTIME_DIR: /run/user/{{ ansible_uid }}
       register: service_status
       ignore_errors: true
 
-    - name: Stop the service if it is running
-      ansible.builtin.systemd:
-        name: your-service.service
-        state: stopped
+    - name: Stop the --user service if it is running
+      ansible.builtin.command:
+        cmd: systemctl --user stop your-service.service
+        environment:
+          XDG_RUNTIME_DIR: /run/user/{{ ansible_uid }}
       when: service_status.rc == 0
 
-    - name: Reset the failed state of the service
+    - name: Reset the failed state of the --user service
       ansible.builtin.command:
-        cmd: systemctl reset-failed your-service.service
+        cmd: systemctl --user reset-failed your-service.service
+        environment:
+          XDG_RUNTIME_DIR: /run/user/{{ ansible_uid }}
 
     - name: Check for temporary files created by the service
       ansible.builtin.find:
-        paths: /run/your-service/
+        paths: /run/user/{{ ansible_uid }}/your-service/
         recurse: yes
       register: temp_files
       ignore_errors: true
@@ -34,9 +39,9 @@
       loop: "{{ temp_files.files }}"
       when: temp_files.matched > 0
 
-    - name: Check logs for the service
+    - name: Check logs for the --user service
       ansible.builtin.shell:
-        cmd: journalctl -u your-service.service
+        cmd: journalctl --user -u your-service.service
       register: service_logs
       ignore_errors: true
 
@@ -46,23 +51,18 @@
 
     - name: Reload systemd manager configuration
       ansible.builtin.command:
-        cmd: systemctl daemon-reload
+        cmd: systemctl --user daemon-reload
+        environment:
+          XDG_RUNTIME_DIR: /run/user/{{ ansible_uid }}
 
-    - name: Restart the service
-      ansible.builtin.systemd:
-        name: your-service.service
-        state: started
+    - name: Restart the --user service
+      ansible.builtin.command:
+        cmd: systemctl --user start your-service.service
+        environment:
+          XDG_RUNTIME_DIR: /run/user/{{ ansible_uid }}
 
-    - name: Enable the service to start at boot (optional)
-      ansible.builtin.systemd:
-        name: your-service.service
-        enabled: yes
-
-    - name: Remove the service file (if necessary, uncomment to use)
-      # ansible.builtin.file:
-      #   path: /etc/systemd/system/your-service.service
-      #   state: absent
-
-    - name: Clear logs (optional, uncomment to use)
-      # ansible.builtin.shell:
-      #   cmd: journalctl --vacuum-time=1s
+    - name: Enable the --user service to start at login (optional)
+      ansible.builtin.command:
+        cmd: systemctl --user enable your-service.service
+        environment:
+          XDG_RUNTIME_DIR: /run/user/{{ ansible_uid }}
