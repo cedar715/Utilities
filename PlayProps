@@ -1,5 +1,68 @@
-- name: Get list of stopped containers (alternative)
-  ansible.builtin.command:
-    cmd: podman container list --filter status=exited,status=stopped --format "{{.ID}} {{.Names}} {{.Status}}"
-  register: stopped_containers
-  changed_when: false
+---
+- name: Clean up and reset a failed systemd service
+  hosts: all
+  become: true
+  tasks:
+
+    - name: Check the status of the service
+      ansible.builtin.shell:
+        cmd: systemctl status your-service.service
+      register: service_status
+      ignore_errors: true
+
+    - name: Stop the service if it is running
+      ansible.builtin.systemd:
+        name: your-service.service
+        state: stopped
+      when: service_status.rc == 0
+
+    - name: Reset the failed state of the service
+      ansible.builtin.command:
+        cmd: systemctl reset-failed your-service.service
+
+    - name: Check for temporary files created by the service
+      ansible.builtin.find:
+        paths: /run/your-service/
+        recurse: yes
+      register: temp_files
+      ignore_errors: true
+
+    - name: Remove temporary files if they exist
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ temp_files.files }}"
+      when: temp_files.matched > 0
+
+    - name: Check logs for the service
+      ansible.builtin.shell:
+        cmd: journalctl -u your-service.service
+      register: service_logs
+      ignore_errors: true
+
+    - name: Display service logs for debugging
+      ansible.builtin.debug:
+        var: service_logs.stdout
+
+    - name: Reload systemd manager configuration
+      ansible.builtin.command:
+        cmd: systemctl daemon-reload
+
+    - name: Restart the service
+      ansible.builtin.systemd:
+        name: your-service.service
+        state: started
+
+    - name: Enable the service to start at boot (optional)
+      ansible.builtin.systemd:
+        name: your-service.service
+        enabled: yes
+
+    - name: Remove the service file (if necessary, uncomment to use)
+      # ansible.builtin.file:
+      #   path: /etc/systemd/system/your-service.service
+      #   state: absent
+
+    - name: Clear logs (optional, uncomment to use)
+      # ansible.builtin.shell:
+      #   cmd: journalctl --vacuum-time=1s
