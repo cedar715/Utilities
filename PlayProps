@@ -1,11 +1,5 @@
-- name: Check if container ID file exists
-  ansible.builtin.stat:
-    path: /path/to/container.id
-  register: container_id_file
-
-- name: Read container ID if file exists
+- name: Get list of stopped containers (alternative)
   ansible.builtin.command:
-    cmd: cat /path/to/container.id
-  register: container_id
-  when: container_id_file.stat.exists
-  changed_when: false # Reading file shouldn't count as a change
+    cmd: podman container list --filter status=exited,status=stopped --format "{{.ID}} {{.Names}} {{.Status}}"
+  register: stopped_containers
+  changed_when: false
