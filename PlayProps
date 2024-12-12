@@ -1,17 +1,8 @@
 - name: Check status of user service foo
   ansible.builtin.command:
     cmd: systemctl --user status foo.service
-  register: service_status
+  register: service_sta tus
   become_user: "{{ target_user }}"  # Specify the user to run as
   environment:
     XDG_RUNTIME_DIR: "/run/user/{{ ansible_facts['getent_passwd'][target_user][1] }}"  # Required for user services
   changed_when: false  # Status check shouldn't count as a change
-
-- name: Check status of the foo.service
-  ansible.builtin.command:
-    cmd: systemctl --user status foo.service
-  register: service_status
-  environment:
-    XDG_RUNTIME_DIR: /run/user/{{ ansible_uid }}  # Replace with the correct directory if necessary
-  failed_when: false
-  changed_when: false
