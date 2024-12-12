@@ -1,8 +1,11 @@
-- name: Check status of user service foo
+- name: Check if container ID file exists
+  ansible.builtin.stat:
+    path: /path/to/container.id
+  register: container_id_file
+
+- name: Read container ID if file exists
   ansible.builtin.command:
-    cmd: systemctl --user status foo.service
-  register: service_sta tus
-  become_user: "{{ target_user }}"  # Specify the user to run as
-  environment:
-    XDG_RUNTIME_DIR: "/run/user/{{ ansible_facts['getent_passwd'][target_user][1] }}"  # Required for user services
-  changed_when: false  # Status check shouldn't count as a change
+    cmd: cat /path/to/container.id
+  register: container_id
+  when: container_id_file.stat.exists
+  changed_when: false # Reading file shouldn't count as a change
