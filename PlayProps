@@ -1,8 +1,7 @@
-- name: Gather details about the syslog logs directory
-  stat:
-    path: /opt/apps/syslog_logs
-  register: syslog_logs_dir_info
-
-- name: Display directory details
-  debug:
-    var: syslog_logs_dir_info.stat
+Name: server
+Type: Custom
+Label: Server
+Values: ${region == 'sg' && kit == 'kit1' ? 'sg_kit1_server1,sg_kit1_server2' : 
+       region == 'sg' && kit == 'kit2' ? 'sg_kit2_server1,sg_kit2_server2' :
+       region == 'uk' && kit == 'kit1' ? 'uk_kit1_server1,uk_kit1_server2' :
+       'uk_kit2_server1,uk_kit2_server2'}
