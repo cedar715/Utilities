@@ -1,3 +1,8 @@
-- name: Kill failed soltel-log-collector service process
-  ansible.builtin.command: pkill -f "soltel-log-collector"
-  ignore_errors: yes  # In case the process is already gone
+- name: Gather details about the syslog logs directory
+  stat:
+    path: /opt/apps/syslog_logs
+  register: syslog_logs_dir_info
+
+- name: Display directory details
+  debug:
+    var: syslog_logs_dir_info.stat
