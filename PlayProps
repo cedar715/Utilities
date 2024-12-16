@@ -1,7 +1,5 @@
-Name: server
-Type: Custom
-Label: Server
-Values: ${region == 'sg' && kit == 'kit1' ? 'sg_kit1_server1,sg_kit1_server2' : 
-       region == 'sg' && kit == 'kit2' ? 'sg_kit2_server1,sg_kit2_server2' :
-       region == 'uk' && kit == 'kit1' ? 'uk_kit1_server1,uk_kit1_server2' :
-       'uk_kit2_server1,uk_kit2_server2'}
+export MINIO_ACCESS_KEY=your-access-key
+export MINIO_SECRET_KEY=your-secret-key
+curl -X GET http://<minio-server>:9000/minio/health/live
+curl -u $MINIO_ACCESS_KEY:$MINIO_SECRET_KEY \
+  -X GET http://<minio-server>:9000/
