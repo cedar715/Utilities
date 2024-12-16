@@ -3,3 +3,5 @@ export MINIO_SECRET_KEY=your-secret-key
 curl -X GET http://<minio-server>:9000/minio/health/live
 curl -u $MINIO_ACCESS_KEY:$MINIO_SECRET_KEY \
   -X GET http://<minio-server>:9000/
+curl -u $MINIO_ACCESS_KEY:$MINIO_SECRET_KEY \
+  -X GET http://<minio-server>:9000/<bucket-name>?list-type=2
