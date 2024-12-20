@@ -1,7 +1,1 @@
-export MINIO_ACCESS_KEY=your-access-key
-export MINIO_SECRET_KEY=your-secret-key
-curl -X GET http://<minio-server>:9000/minio/health/live
-curl -u $MINIO_ACCESS_KEY:$MINIO_SECRET_KEY \
-  -X GET http://<minio-server>:9000/
-curl -u $MINIO_ACCESS_KEY:$MINIO_SECRET_KEY \
-  -X GET http://<minio-server>:9000/<bucket-name>?list-type=2
+./sdkperf_java.sh -cip=tcps://host.hk.example.com:5671 -cu=TRACER_USERNAME -cp=TRACER_PASSWORD -sql=queue://#telemetry-queue -mt=persistent -cc=1
