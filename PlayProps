@@ -1,1 +1,3 @@
-./sdkperf_java.sh -cip=tcps://host.hk.example.com:5671 -cu=TRACER_USERNAME -cp=TRACER_PASSWORD -sql=queue://#telemetry-queue -mt=persistent -cc=1
+kubectl get secret my-source-secret -n default -o yaml \
+| sed "s/name: my-source-secret/name: my-target-secret/g" \
+| kubectl apply -n default -f -
