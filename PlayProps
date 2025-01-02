@@ -1,37 +1,32 @@
----
-# site-observability.yaml
-- name: Generate certificates for observability components
+- name: Generate list of CNs
   hosts: localhost
-  gather_facts: false
-  
+  gather_facts: no
   vars:
-    domain_suffix: "example.com"
-    # Define VPN configurations that match amqps.vpns structure
-    amqps:
-      vpns:
-        grafana:
-          host: "grafana.{{ domain_suffix }}"
-        prometheus:
-          host: "prometheus.{{ domain_suffix }}"
-        jaeger:
-          host: "jaeger.{{ domain_suffix }}"
-        alertmanager:
-          host: "alertmanager.{{ domain_suffix }}"
-        node_exporter:
-          host: "node-exporter.{{ domain_suffix }}"
-    
-    # Initialize empty list for generate_hosts as required by the role
-    generate_hosts: []
+    global_fqdn: "example.com"
+    service_names:
+      - grafana
+      - prometheus
+      - jaeger
+  tasks:
+    - name: Build generate_hosts list by appending domain
+      set_fact:
+        generate_hosts: "{{ service_names | map('regex_replace', '(.*)', '\\1.' + global_fqdn) | list }}"
+      tags:
+        - build_hosts
+        - pre_task
 
-  pre_tasks:
-    - name: Display VPN hosts to be generated
+    - name: Debug generate_hosts to verify
       debug:
-        msg: "Will generate cert for: {{ amqps.vpns[item].host }}"
-      loop: "{{ amqps.vpns.keys() | list }}"
-      
-    - name: Pause for verification
-      pause:
-        prompt: "Please verify the hosts above. Press ENTER to continue or Ctrl+C to abort"
+        var: generate_hosts
+      tags:
+        - debug_hosts
 
+- name: Include role to process CNs
+  hosts: localhost
   roles:
-    - role: certbot-role  # Replace with your actual role name
+    - role: your_role_name
+      vars:
+        generate_hosts: "{{ generate_hosts }}"
+      tags:
+        - generate_certs
+        - role_execution
