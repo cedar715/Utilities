@@ -1,4 +1,36 @@
 ---
+---
+# test-cns.yaml
+- name: Test CN generation for observability components
+  hosts: localhost
+  gather_facts: false
+  
+  vars:
+    domain_suffix: "example.com"
+    components:
+      - grafana
+      - prometheus
+      - jaeger
+      - alertmanager
+      - node-exporter
+
+  tasks:
+    - name: Generate CN list
+      set_fact:
+        cert_common_names: "{{ components | map('regex_replace', '^(.*)$', '\\1.' + domain_suffix) | list }}"
+
+    - name: Display generated CNs
+      debug:
+        msg: "Generated CNs:"
+        verbosity: 0
+
+    - name: List all CNs
+      debug:
+        msg: "- {{ item }}"
+      loop: "{{ cert_common_names }}"
+      loop_control:
+        label: "{{ item }}"
+
 # site-observability.yaml
 - name: Generate certificates for observability components
   hosts: localhost
