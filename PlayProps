@@ -1,5 +1,40 @@
 ---
 ---
+- name: Generate certificates for observability components
+  hosts: localhost
+  vars:
+    components:
+      - grafana
+      - prometheus
+      - jaeger
+    domain: "example.com"
+    certs_dir: "/etc/ssl/certs"
+  tasks:
+    - name: Create a list of CNs
+      set_fact:
+        cn_list: "{{ components | map('regex_replace', '(.*)', '\\1.' + domain) | list }}"
+    
+    - name: Debug CN list
+      debug:
+        var: cn_list
+
+    - name: Ensure certs directory exists
+      file:
+        path: "{{ certs_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Generate certificates for each CN
+      include_role:
+        name: generate_cert
+      with_items: "{{ cn_list }}"
+      loop_control:
+        loop_var: cn
+      vars:
+        cert_cn: "{{ cn }}"
+        cert_path: "{{ certs_dir }}/{{ cn }}.crt"
+
+---
 # test-cns.yaml
 - name: Test CN generation for observability components
   hosts: localhost
