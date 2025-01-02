@@ -1,101 +1,37 @@
 ---
----
-- name: Generate certificates for observability components
-  hosts: localhost
-  vars:
-    components:
-      - grafana
-      - prometheus
-      - jaeger
-    domain: "example.com"
-    certs_dir: "/etc/ssl/certs"
-  tasks:
-    - name: Create a list of CNs
-      set_fact:
-        cn_list: "{{ components | map('regex_replace', '(.*)', '\\1.' + domain) | list }}"
-    
-    - name: Debug CN list
-      debug:
-        var: cn_list
-
-    - name: Ensure certs directory exists
-      file:
-        path: "{{ certs_dir }}"
-        state: directory
-        mode: '0755'
-
-    - name: Generate certificates for each CN
-      include_role:
-        name: generate_cert
-      with_items: "{{ cn_list }}"
-      loop_control:
-        loop_var: cn
-      vars:
-        cert_cn: "{{ cn }}"
-        cert_path: "{{ certs_dir }}/{{ cn }}.crt"
-
----
-# test-cns.yaml
-- name: Test CN generation for observability components
-  hosts: localhost
-  gather_facts: false
-  
-  vars:
-    domain_suffix: "example.com"
-    components:
-      - grafana
-      - prometheus
-      - jaeger
-      - alertmanager
-      - node-exporter
-
-  tasks:
-    - name: Generate CN list
-      set_fact:
-        cert_common_names: "{{ components | map('regex_replace', '^(.*)$', '\\1.' + domain_suffix) | list }}"
-
-    - name: Display generated CNs
-      debug:
-        msg: "Generated CNs:"
-        verbosity: 0
-
-    - name: List all CNs
-      debug:
-        msg: "- {{ item }}"
-      loop: "{{ cert_common_names }}"
-      loop_control:
-        label: "{{ item }}"
-
 # site-observability.yaml
 - name: Generate certificates for observability components
   hosts: localhost
   gather_facts: false
   
   vars:
-    domain_suffix: "example.com"  # Change to your domain
-    components:
-      - grafana
-      - prometheus
-      - jaeger
-      - alertmanager
-      - node-exporter
+    domain_suffix: "example.com"
+    # Define VPN configurations that match amqps.vpns structure
+    amqps:
+      vpns:
+        grafana:
+          host: "grafana.{{ domain_suffix }}"
+        prometheus:
+          host: "prometheus.{{ domain_suffix }}"
+        jaeger:
+          host: "jaeger.{{ domain_suffix }}"
+        alertmanager:
+          host: "alertmanager.{{ domain_suffix }}"
+        node_exporter:
+          host: "node-exporter.{{ domain_suffix }}"
+    
+    # Initialize empty list for generate_hosts as required by the role
+    generate_hosts: []
 
   pre_tasks:
-    - name: Generate CN list for certificates
-      set_fact:
-        cert_common_names: "{{ components | map('regex_replace', '^(.*)$', '\\1.' + domain_suffix) | list }}"
+    - name: Display VPN hosts to be generated
+      debug:
+        msg: "Will generate cert for: {{ amqps.vpns[item].host }}"
+      loop: "{{ amqps.vpns.keys() | list }}"
+      
+    - name: Pause for verification
+      pause:
+        prompt: "Please verify the hosts above. Press ENTER to continue or Ctrl+C to abort"
 
   roles:
-    - role: your-cert-generation-role  # Replace with your actual role name
-      vars:
-        common_names: "{{ cert_common_names }}"
-        # Add any other variables your cert generation role expects
-        # For example:
-        # cert_path: "/path/to/certs"
-        # cert_owner: "cert-user"
-        # cert_validity_days: 365
-
-  post_tasks:
-    - name: Display generated certificate details
-      debug:
-        msg: "Generated certificates for {{ cert_common_names | join(', ') }}"
+    - role: certbot-role  # Replace with your actual role name
