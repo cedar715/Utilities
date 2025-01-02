@@ -1,3 +1,34 @@
-kubectl get secret my-source-secret -n default -o yaml \
-| sed "s/name: my-source-secret/name: my-target-secret/g" \
-| kubectl apply -n default -f -
+---
+# site-observability.yaml
+- name: Generate certificates for observability components
+  hosts: localhost
+  gather_facts: false
+  
+  vars:
+    domain_suffix: "example.com"  # Change to your domain
+    components:
+      - grafana
+      - prometheus
+      - jaeger
+      - alertmanager
+      - node-exporter
+
+  pre_tasks:
+    - name: Generate CN list for certificates
+      set_fact:
+        cert_common_names: "{{ components | map('regex_replace', '^(.*)$', '\\1.' + domain_suffix) | list }}"
+
+  roles:
+    - role: your-cert-generation-role  # Replace with your actual role name
+      vars:
+        common_names: "{{ cert_common_names }}"
+        # Add any other variables your cert generation role expects
+        # For example:
+        # cert_path: "/path/to/certs"
+        # cert_owner: "cert-user"
+        # cert_validity_days: 365
+
+  post_tasks:
+    - name: Display generated certificate details
+      debug:
+        msg: "Generated certificates for {{ cert_common_names | join(', ') }}"
