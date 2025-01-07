@@ -1,1 +1,37 @@
-localhost,127.0.0.1,.local,github.com,api.github.com,raw.githubusercontent.com,copilot.githubusercontent.com,copilot-proxy.githubusercontent.com
+@Component
+@RequiredArgsConstructor
+public class SolaceEventParser {
+
+    private static final Map<String, Object> EMPTY_MAP = Collections.emptyMap();
+
+    private final SyslogEventParser syslogEventParser;
+    private final EventPatterns eventPatterns;
+
+    public Map<String, Object> parse(final SolaceSyslogEvent syslogEvent) {
+        if (!isValidEvent(syslogEvent)) {
+            return EMPTY_MAP;
+        }
+
+        // Wrap in Optional to handle potential null values
+        return Optional.ofNullable(eventPatterns.getEvents().get(syslogEvent.normalizedEvent()))
+                .map(pattern -> parseWithPattern(syslogEvent, pattern))
+                .orElse(EMPTY_MAP);
+    }
+
+    private boolean isValidEvent(SolaceSyslogEvent event) {
+        if (event == null || event.normalizedEvent() == null) {
+            log.error("Invalid SolaceSyslogEvent: {}", event);
+            return false;
+        }
+        return true;
+    }
+
+    private Map<String, Object> parseWithPattern(SolaceSyslogEvent event, String pattern) {
+        try {
+            return syslogEventParser.parse(event, pattern);
+        } catch (SyslogParseException e) {
+            log.error("Error parsing syslog event: {}, with pattern: {}", event, pattern, e);
+            return EMPTY_MAP;
+        }
+    }
+}
