@@ -1,1 +1,16 @@
 
+keytool -importkeystore \
+    -srckeystore keystore.jks \
+    -destkeystore keystore.p12 \
+    -deststoretype PKCS12 \
+    -srcalias <source_alias> \
+    -destalias <destination_alias> \
+    -srcstorepass <jks_password> \
+    -deststorepass <pkcs12_password>
+
+
+openssl pkcs12 -in keystore.p12 \
+    -nodes \
+    -nocerts \
+    -out private_key.pem \
+    -password pass:<pkcs12_password>
