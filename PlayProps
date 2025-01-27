@@ -1,3 +1,14 @@
+---
+# Playbook: cleanup_json_syslog.yml
+# Description: Cleans up old JSON syslog files based on age
+# Required variables:
+#   - cleanup_path: Path to cleanup (default: /default/path)
+#   - cleanup_age: Age of files to delete (default: 7d)
+# Optional variables:
+#   - dry_run: Preview deletion without executing (default: false)
+#   - backup_enabled: Create backups before deletion (default: false)
+#   - backup_path: Path for backups (default: <cleanup_path>/backup)
+
 - name: Clean up JSON syslog files older than specified age from specified path
   hosts: "{{ override_host | default( applicable_host | default('general_nodes') ) }}"
   become: true
@@ -7,6 +18,9 @@
   vars:
     cleanup_path: "{{ cleanup_path | default('/default/path') }}"
     cleanup_age: "{{ cleanup_age | default('7d') }}"
+    dry_run: "{{ dry_run | default(false) }}"
+    backup_enabled: "{{ backup_enabled | default(false) }}"
+    backup_path: "{{ backup_path | default(cleanup_path + '/backup') }}"
 
   pre_tasks:
     - name: Verify required variables
@@ -14,34 +28,55 @@
         that:
           - cleanup_path is defined
           - cleanup_age is defined
-        fail_msg: "Required variables cleanup_path and cleanup_age must be defined"
+          - cleanup_age is match('^\d+[dwmy]$')
+          - cleanup_age is not match('^0[dwmy]$')
+        fail_msg: >
+          Required variables must be properly defined:
+          - cleanup_path must be a valid path
+          - cleanup_age must be a positive number followed by d(days), w(weeks), m(months), or y(years)
+      tags: ['always']
 
-    - name: Ensure cleanup path is writable
+    - name: Ensure cleanup path exists and is writable
       file:
         path: "{{ cleanup_path }}"
         state: directory
+        mode: '0755'
       register: path_check
+      tags: ['always']
 
     - name: Fail if cleanup path is not writable
       fail:
         msg: "The specified cleanup path {{ cleanup_path }} is not writable."
       when: path_check is failed
+      tags: ['always']
+
+    - name: Create backup directory if backup is enabled
+      file:
+        path: "{{ backup_path }}"
+        state: directory
+        mode: '0755'
+      when: backup_enabled
+      tags: ['backup']
 
   tasks:
     - name: List all files in the folder
       ansible.builtin.find:
         paths: "{{ cleanup_path }}"
         patterns: "*.json"
+        recurse: no
       register: all_files
+      tags: ['check', 'files']
 
     - name: Debug - List all files in the folder
       ansible.builtin.debug:
         msg: "All files in the folder: {{ all_files.files | map(attribute='path') | list }}"
+      tags: ['debug']
 
     - name: Fail if no files found in path
       fail:
         msg: "No files found in the specified path: {{ cleanup_path }}"
       when: all_files.matched == 0
+      tags: ['check']
 
     - name: Find files older than specified age
       ansible.builtin.find:
@@ -49,20 +84,51 @@
         patterns: "*.json"
         age: "{{ cleanup_age }}"
         age_stamp: mtime
+        recurse: no
       register: old_files
+      tags: ['check', 'files']
 
     - name: Debug - List files to be deleted
       ansible.builtin.debug:
-        msg: "{{ old_files.matched }} files found for deletion: {{ old_files.files | map(attribute='path') | list }}"
+        msg: >
+          {{ old_files.matched }} files found for deletion:
+          Files: {{ old_files.files | map(attribute='path') | list }}
+          Total size: {{ (old_files.files | map(attribute='size') | sum) | default(0) | human_readable }}
+      tags: ['debug']
+
+    - name: Backup files before deletion
+      ansible.builtin.copy:
+        src: "{{ item.path }}"
+        dest: "{{ backup_path }}/{{ item.path | basename }}"
+        mode: preserve
+        remote_src: yes
+      loop: "{{ old_files.files }}"
+      when: 
+        - backup_enabled
+        - old_files.matched > 0
+        - not dry_run
+      register: backup_result
+      tags: ['backup']
 
     - name: Remove old files
       ansible.builtin.file:
         path: "{{ item.path }}"
         state: absent
       loop: "{{ old_files.files }}"
-      when: old_files.matched > 0
+      when: 
+        - old_files.matched > 0
+        - not dry_run
       register: deletion_result
+      tags: ['delete']
 
     - name: Debug - Deletion summary
       ansible.builtin.debug:
-        msg: "Deletion results: {{ deletion_result.results | map(attribute='item.path') | list }}"
+        msg: >
+          {% if dry_run %}
+          DRY RUN - No files were actually deleted
+          {% endif %}
+          Operation summary:
+          - Files processed: {{ old_files.matched }}
+          - Files deleted: {{ deletion_result.results | selectattr('changed') | list | length if not dry_run else 0 }}
+          - Backup status: {{ backup_result.results | selectattr('changed') | list | length if backup_enabled and not dry_run else 'Disabled' }}
+      tags: ['debug']
