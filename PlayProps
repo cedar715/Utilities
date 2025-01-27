@@ -12,7 +12,6 @@
 - name: Clean up JSON syslog files older than specified age from specified path
   hosts: "{{ override_host | default( applicable_host | default('general_nodes') ) }}"
   become: true
-  become_user: "{{ solace_local_service_user }}"
   gather_facts: yes
 
   vars:
