@@ -1,16 +1,68 @@
+- name: Clean up JSON syslog files older than specified age from specified path
+  hosts: "{{ override_host | default( applicable_host | default('general_nodes') ) }}"
+  become: true
+  become_user: "{{ solace_local_service_user }}"
+  gather_facts: yes
 
-keytool -importkeystore \
-    -srckeystore keystore.jks \
-    -destkeystore keystore.p12 \
-    -deststoretype PKCS12 \
-    -srcalias <source_alias> \
-    -destalias <destination_alias> \
-    -srcstorepass <jks_password> \
-    -deststorepass <pkcs12_password>
+  vars:
+    cleanup_path: "{{ cleanup_path | default('/default/path') }}"
+    cleanup_age: "{{ cleanup_age | default('7d') }}"
 
+  pre_tasks:
+    - name: Verify required variables
+      assert:
+        that:
+          - cleanup_path is defined
+          - cleanup_age is defined
+        fail_msg: "Required variables cleanup_path and cleanup_age must be defined"
 
-openssl pkcs12 -in keystore.p12 \
-    -nodes \
-    -nocerts \
-    -out private_key.pem \
-    -password pass:<pkcs12_password>
+    - name: Ensure cleanup path is writable
+      file:
+        path: "{{ cleanup_path }}"
+        state: directory
+      register: path_check
+
+    - name: Fail if cleanup path is not writable
+      fail:
+        msg: "The specified cleanup path {{ cleanup_path }} is not writable."
+      when: path_check is failed
+
+  tasks:
+    - name: List all files in the folder
+      ansible.builtin.find:
+        paths: "{{ cleanup_path }}"
+        patterns: "*.json"
+      register: all_files
+
+    - name: Debug - List all files in the folder
+      ansible.builtin.debug:
+        msg: "All files in the folder: {{ all_files.files | map(attribute='path') | list }}"
+
+    - name: Fail if no files found in path
+      fail:
+        msg: "No files found in the specified path: {{ cleanup_path }}"
+      when: all_files.matched == 0
+
+    - name: Find files older than specified age
+      ansible.builtin.find:
+        paths: "{{ cleanup_path }}"
+        patterns: "*.json"
+        age: "{{ cleanup_age }}"
+        age_stamp: mtime
+      register: old_files
+
+    - name: Debug - List files to be deleted
+      ansible.builtin.debug:
+        msg: "{{ old_files.matched }} files found for deletion: {{ old_files.files | map(attribute='path') | list }}"
+
+    - name: Remove old files
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ old_files.files }}"
+      when: old_files.matched > 0
+      register: deletion_result
+
+    - name: Debug - Deletion summary
+      ansible.builtin.debug:
+        msg: "Deletion results: {{ deletion_result.results | map(attribute='item.path') | list }}"
