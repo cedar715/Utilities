@@ -8,16 +8,24 @@
 - name: Get latest file path
   set_fact:
     latest_file_path: "{{ (latest_file.files | sort(attribute='mtime',reverse=true))[0].path }}"
+  when: latest_file.files | length > 0
 
 - name: Read last N lines from the file
   shell: "tail -n {{ num_lines }} {{ latest_file_path }}"
   register: file_content
   vars:
     num_lines: 10  # Change this number to read different number of lines
+  when: latest_file.files | length > 0
 
 - name: Display the content
   debug:
     var: file_content.stdout_lines
+  when: latest_file.files | length > 0
+
+- name: Display warning if no files found
+  debug:
+    msg: "No files found in /foo/bar directory"
+  when: latest_file.files | length == 0
 
 # Example playbook usage:
 # - hosts: your_target_hosts
