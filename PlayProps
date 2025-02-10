@@ -1,5 +1,5 @@
-# This will group pods by node
-for node in $(oc get nodes -o name); do
-    echo "Pods running on $node:"
-    oc get pods --all-namespaces -o wide --field-selector spec.nodeName=$(echo $node | cut -d'/' -f2)
-done
+@echo off
+FOR /F "tokens=*" %i IN ('oc get nodes --no-headers -o custom-columns=":metadata.name"') DO (
+    echo Pods running on %i:
+    oc get pods --all-namespaces -o wide --field-selector spec.nodeName=%i
+)
