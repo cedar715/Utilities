@@ -1,35 +1,5 @@
-- name: Find the latest file in directory
-  find:
-    paths: /foo/bar
-    patterns: '*'
-    file_type: file
-  register: latest_file
-
-- name: Get latest file path
-  set_fact:
-    latest_file_path: "{{ (latest_file.files | sort(attribute='mtime',reverse=true))[0].path }}"
-  when: latest_file.files | length > 0
-
-- name: Read last N lines from the file
-  shell: "tail -n {{ num_lines }} {{ latest_file_path }}"
-  register: file_content
-  vars:
-    num_lines: 10  # Change this number to read different number of lines
-  when: latest_file.files | length > 0
-
-- name: Display the content
-  debug:
-    var: file_content.stdout_lines
-  when: latest_file.files | length > 0
-
-- name: Display warning if no files found
-  debug:
-    msg: "No files found in /foo/bar directory"
-  when: latest_file.files | length == 0
-
-# Example playbook usage:
-# - hosts: your_target_hosts
-#   vars:
-#     num_lines: 10  # Override this in your playbook or via extra-vars
-#   tasks:
-#     - include_tasks: read_latest_file.yml
+# This will group pods by node
+for node in $(oc get nodes -o name); do
+    echo "Pods running on $node:"
+    oc get pods --all-namespaces -o wide --field-selector spec.nodeName=$(echo $node | cut -d'/' -f2)
+done
