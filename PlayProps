@@ -1,5 +1,20 @@
-@echo off
-FOR /F "tokens=*" %i IN ('oc get nodes --no-headers -o custom-columns=":metadata.name"') DO (
-    echo Pods running on %i:
-    oc get pods --all-namespaces -o wide --field-selector spec.nodeName=%i
-)
+GET /your_index/_search
+{
+  "size": 0,
+  "query": {
+    "range": {
+      "@timestamp": {
+        "gte": "now-1h",
+        "lte": "now"
+      }
+    }
+  },
+  "aggs": {
+    "group_by_X": {
+      "terms": {
+        "field": "X.keyword",
+        "size": 10
+      }
+    }
+  }
+}
