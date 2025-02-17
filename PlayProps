@@ -1,20 +1,5 @@
-GET /your_index/_search
-{
-  "size": 0,
-  "query": {
-    "range": {
-      "@timestamp": {
-        "gte": "now-1h",
-        "lte": "now"
-      }
-    }
-  },
-  "aggs": {
-    "group_by_X": {
-      "terms": {
-        "field": "X.keyword",
-        "size": 10
-      }
-    }
-  }
+if (doc.containsKey('sed.DATA.keyword') && doc['sed.DATA.keyword'].size() > 0) {
+    String field = doc['sed.DATA.keyword'].value;
+    return field.splitOnToken("/")[0] + "/" + field.splitOnToken("/")[1];
 }
+return "";
