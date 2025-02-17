@@ -1,5 +1,8 @@
-if (doc.containsKey('sed.DATA.keyword') && doc['sed.DATA.keyword'].size() > 0) {
+if (!doc['sed.DATA.keyword'].empty) {
     String field = doc['sed.DATA.keyword'].value;
-    return field.splitOnToken("/")[0] + "/" + field.splitOnToken("/")[1];
+    String[] parts = field.splitOnToken("/");
+    if (parts.length >= 2) {
+        return parts[0] + "/" + parts[1];
+    }
 }
 return "";
