@@ -1,3 +1,3 @@
-sum(count_over_time(probe_http_status_code{job="solace_health_checks"} == 503[2m])) == 2
+count by (env, region) (count_over_time(probe_http_status_code{service.name="solace_health_checks_bb"}==503[2m])) == 2
 
-sum(count_over_time(probe_http_status_code{job="solace_health_checks"} == 503[2m])) without (instance) == 2
+sum by (env, region) (count_over_time(probe_http_status_code{service.name="solace_health_checks_bb"}==503[2m])) == 2
