@@ -1,11 +1,18 @@
-groups:
-  - name: SolaceAlerts
-    rules:
-      - alert: SolaceHA_Down
-        expr: count_over_time(probe_http_status_code{job="solace_health_checks"} == 503[2m]) by (env, host, region) == 2
-        for: 2m
-        labels:
-          severity: critical
-        annotations:
-          summary: "Solace HA Pair Down"
-          description: "Both brokers in HA pair (Env: {{ $labels.env }}, Host: {{ $labels.host }}, Region: {{ $labels.region }}) are down for 2 minutes."
+relabel_configs:
+  # Extract `host` (e.g., dce-prd2-b)
+  - source_labels: [__param_target]
+    regex: '^https?://([^.]+)\.[^.]+\.[^.]+\.app\.example\.com:5550/health-check/guaranteed-active$'
+    target_label: host
+    replacement: '$1'
+
+  # Extract `item` (e.g., 5678)
+  - source_labels: [__param_target]
+    regex: '^https?://([^.]+)\.([^.]+)\.[^.]+\.app\.example\.com:5550/health-check/guaranteed-active$'
+    target_label: item
+    replacement: '$2'
+
+  # Extract `region` (e.g., eu)
+  - source_labels: [__param_target]
+    regex: '^https?://([^.]+)\.[^.]+\.([^.]+)\.app\.example\.com:5550/health-check/guaranteed-active$'
+    target_label: region
+    replacement: '$3'
