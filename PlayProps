@@ -1,11 +1,19 @@
-groups:
-  - name: SolaceAlerts
-    rules:
-      - alert: SolaceHA_Down
-        expr: count_over_time(probe_http_status_code{job="solace_health_checks"} == 503[2m]) by (env, host, region) == 2
-        for: 2m
-        labels:
-          severity: critical
-        annotations:
-          summary: "Solace HA Pair Down"
-          description: "Both brokers in HA pair (Env: {{ $labels.env }}, Host: {{ $labels.host }}, Region: {{ $labels.region }}) are down for 2 minutes."
+scrape_configs:
+  - job_name: 'solace_health_checks'
+    metrics_path: /probe
+    params:
+      module: [http_2xx]  # Ensure we check for HTTP responses
+    static_configs:
+      - targets:
+          - http://solace-pr-1a.example.com:5550/health-check/guaranteed-active
+          - http://solace-pr-1b.example.com:5550/health-check/guaranteed-active
+          - http://solace-dr-2a.example.com:5550/health-check/guaranteed-active
+          - http://solace-dr-2b.example.com:5550/health-check/guaranteed-active
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115  # Use the Blackbox Exporter
+
