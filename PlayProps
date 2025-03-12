@@ -1,15 +1,11 @@
-relabel_configs:
-  - source_labels: [__address__]
-    regex: '^([^.]+)\.[^.]+\.([^.]+)\.app\.example\.com:5550$'
-    target_label: host
-    replacement: '$1'  # Extracts 'dce-prd1-a'
-
-  - source_labels: [host]
-    regex: '^([^-]+-[^-]+)-[^-]+$'
-    target_label: env
-    replacement: '$1'  # Extracts 'dce-prd1'
-
-  - source_labels: [__address__]
-    regex: '^([^.]+)\.[^.]+\.([^.]+)\.app\.example\.com:5550$'
-    target_label: region
-    replacement: '$2'  # Extracts 'region'
+groups:
+  - name: SolaceAlerts
+    rules:
+      - alert: SolaceHA_Down
+        expr: count_over_time(probe_http_status_code{job="solace_health_checks"} == 503[2m]) by (env, host, region) == 2
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Solace HA Pair Down"
+          description: "Both brokers in HA pair (Env: {{ $labels.env }}, Host: {{ $labels.host }}, Region: {{ $labels.region }}) are down for 2 minutes."
