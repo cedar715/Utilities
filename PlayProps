@@ -2,18 +2,38 @@ scrape_configs:
   - job_name: 'solace_health_checks'
     metrics_path: /probe
     params:
-      module: [http_2xx]  # Ensure we check for HTTP responses
+      module: [http_2xx]  # Ensures we check for HTTP responses
     static_configs:
       - targets:
-          - http://solace-pr-1a.example.com:5550/health-check/guaranteed-active
-          - http://solace-pr-1b.example.com:5550/health-check/guaranteed-active
-          - http://solace-dr-2a.example.com:5550/health-check/guaranteed-active
-          - http://solace-dr-2b.example.com:5550/health-check/guaranteed-active
+          - http://dce-prd1-a.1234.us.app.example.com:5550/health-check/guaranteed-active
+          - http://dce-prd1-b.1234.us.app.example.com:5550/health-check/guaranteed-active
+          - http://dce-prd2-a.5678.eu.app.example.com:5550/health-check/guaranteed-active
+          - http://dce-prd2-b.5678.eu.app.example.com:5550/health-check/guaranteed-active
     relabel_configs:
+      # Set target for Blackbox Exporter
       - source_labels: [__address__]
         target_label: __param_target
+
       - source_labels: [__param_target]
         target_label: instance
-      - target_label: __address__
-        replacement: blackbox-exporter:9115  # Use the Blackbox Exporter
 
+      - target_label: __address__
+        replacement: blackbox-exporter:9115  # Use Blackbox Exporter
+
+      # Extract 'host' (dce-prd1-a) from target address
+      - source_labels: [__param_target]
+        regex: '^([^.]+)\.[^.]+\.([^.]+)\.app\.example\.com.*$'
+        target_label: host
+        replacement: '$1'
+
+      # Extract 'env' (dce-prd1) from host
+      - source_labels: [host]
+        regex: '^([^-]+-[^-]+)-[^-]+$'
+        target_label: env
+        replacement: '$1'
+
+      # Extract 'region' (us, eu, etc.) from target address
+      - source_labels: [__param_target]
+        regex: '^([^.]+)\.[^.]+\.([^.]+)\.app\.example\.com.*$'
+        target_label: region
+        replacement: '$2'
