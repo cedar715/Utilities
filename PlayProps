@@ -1,8 +1,15 @@
-if (!doc['sed.DATA.keyword'].empty) {
-    String field = doc['sed.DATA.keyword'].value;
-    String[] parts = field.splitOnToken("/");
-    if (parts.length >= 2) {
-        return parts[0] + "/" + parts[1];
-    }
-}
-return "";
+scrape_configs:
+  - job_name: 'solace_health_checks'
+    metrics_path: /health-check/guaranteed-active
+    scheme: http  # Change to 'https' if using TLS
+    static_configs:
+      - targets:
+        - solace-pr-1a.example.com:5550  # PR Instance A
+        - solace-pr-1b.example.com:5550  # PR Instance B
+        - solace-dr-2a.example.com:5550  # DR Instance A
+        - solace-dr-2b.example.com:5550  # DR Instance B
+    relabel_configs:
+      - source_labels: [__address__]
+        regex: '(.*):5550'
+        target_label: instance
+        replacement: '$1'
