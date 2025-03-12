@@ -1,1 +1,3 @@
 sum(count_over_time(probe_http_status_code{job="solace_health_checks"} == 503[2m])) == 2
+
+sum(count_over_time(probe_http_status_code{job="solace_health_checks"} == 503[2m])) without (instance) == 2
