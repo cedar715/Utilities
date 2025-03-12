@@ -1,12 +1,11 @@
-modules:
-  http_2xx:
-    prober: http
-    timeout: 5s
-    http:
-      valid_http_versions: [ "HTTP/1.1", "HTTP/2" ]
-      valid_status_codes: []  # Defaults to 2xx
-      method: GET
-      fail_if_ssl: false
-      fail_if_not_ssl: false
-      follow_redirects: true
-      preferred_ip_protocol: "ip4"  # Use IPv4
+groups:
+  - name: SolaceAlerts
+    rules:
+      - alert: SolaceHA_Down
+        expr: count_over_time(probe_http_status_code{job="solace_health_checks"} == 503[2m]) by (env, host, region) == 2
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Solace HA Pair Down"
+          description: "Both brokers in HA pair (Env: {{ $labels.env }}, Host: {{ $labels.host }}, Region: {{ $labels.region }}) are down for 2 minutes."
