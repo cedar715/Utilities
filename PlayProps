@@ -1,1 +1,63 @@
-count_over_time(probe_http_status_code{service.name="solace_health_checks_bb"} == 503 [2m])
+export ALIAS_MAP="hkpassol001=dce-prd-a,sgpassol001=dce-prd-b"
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+@Component
+public class AliasConfig {
+    
+    private final Map<String, String> aliasMap;
+
+    public AliasConfig(@Value("${ALIAS_MAP:}") String aliasConfig) {
+        aliasMap = aliasConfig.isEmpty() ? new HashMap<>() :
+            Stream.of(aliasConfig.split(","))
+                  .map(entry -> entry.split("="))
+                  .collect(Collectors.toMap(e -> e[0], e -> e[1]));
+    }
+
+    public String getAlias(String host) {
+        return aliasMap.getOrDefault(host, host);
+    }
+}
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
+
+public class MyModel {
+    
+    @JsonIgnore
+    private String host;
+
+    @JsonProperty("alias")
+    private String alias;
+
+    public MyModel(String host, AliasConfig aliasConfig) {
+        this.host = host;
+        this.alias = aliasConfig.getAlias(host);
+    }
+
+    public String getAlias() {
+        return alias;
+    }
+}
+@Service
+public class MyService {
+
+    private final AliasConfig aliasConfig;
+
+    @Autowired
+    public MyService(AliasConfig aliasConfig) {
+        this.aliasConfig = aliasConfig;
+    }
+
+    public void indexData(MyModel model) {
+        // Transform before sending
+        String alias = aliasConfig.getAlias(model.getHost());
+        model.setAlias(alias);
+        
+        // Send to Elasticsearch (pseudo-code)
+        // elasticsearchClient.index(model);
+    }
+}
