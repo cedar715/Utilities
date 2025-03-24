@@ -1,96 +1,52 @@
-Understanding the Problem
-When you have a setup like client -> Nginx -> Solace, you're dealing with two separate TCP connections:
+package com.yourcompany.config;
 
-Client to Nginx connection
-Nginx to Solace connection
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.context.annotation.Configuration;
 
-The "TCP Keep-Alive Failure" message suggests that TCP keepalive packets are being sent, but they're failing to maintain the connection. This typically happens when:
+import java.util.HashMap;
+import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 
-One side is sending keepalive probes, but the other isn't responding
-A middle device (firewall, load balancer) is dropping idle connections
-Keepalive intervals are mismatched between the different components
-
-Root Causes and Solutions
-1. Mismatched Keepalive Configuration
-Solace, Nginx, and the clients might all have different keepalive settings. For a stable system, these need to be harmonized.
-Solution: Configure keepalive settings consistently across all three components:
-For Nginx, add or update these directives:
-Copy# Keepalive for client connections
-keepalive_timeout 180s;  # Adjust based on your needs
-
-# Keepalive for upstream (Solace) connections
-proxy_http_version 1.1;
-proxy_set_header Connection "";
-proxy_connect_keepalive on;
-proxy_socket_keepalive on;  # Enable TCP keepalives
-proxy_keepalive_timeout 180s;  # Should match or be slightly longer than Solace's setting
-2. TCP Keepalive Timing Parameters
-The TCP keepalive mechanism has three important parameters:
-
-keepalive_time: How long a connection can be idle before sending probes
-keepalive_intvl: How frequently to send probes when no response
-keepalive_probes: How many failed probes before declaring the connection dead
-
-Solution: Configure these at the OS level on your Nginx server:
-Copy# For Linux (add to /etc/sysctl.conf or similar)
-net.ipv4.tcp_keepalive_time = 600
-net.ipv4.tcp_keepalive_intvl = 60
-net.ipv4.tcp_keepalive_probes = 5
-
-# Then apply with: sysctl -p
-3. Intermediate Network Devices
-Firewalls, NAT devices, or load balancers might be dropping idle connections.
-Solution:
-
-Identify any intermediate network devices in the path
-Configure them to allow longer timeout periods for the traffic between clients, Nginx, and Solace
-Ensure they pass through the TCP keepalive packets
-
-4. Nginx Proxy Timeout Settings
-Nginx might be terminating connections before keepalive can maintain them.
-Solution: Adjust these timeout settings:
-Copyproxy_read_timeout 300s;    # How long Nginx waits for Solace to respond
-proxy_send_timeout 300s;    # How long Nginx waits when sending to Solace
-5. Solace Configuration
-Solace message brokers also have their own keepalive and idle timeout settings.
-Solution: Ensure Solace is configured with appropriate timeout settings that align with your Nginx configuration. This typically needs to be done through the Solace management interface or CLI.
-Complete Nginx Configuration Example
-Here's a more complete Nginx configuration to address the issue:
-Copyserver {
-    # Server settings
-    listen 80;
+@Configuration
+@ConfigurationProperties(prefix = "app.hostname")
+public class HostnameAliasConfig {
     
-    # Client connection settings
-    keepalive_timeout 180s;
+    private static final Logger logger = LoggerFactory.getLogger(HostnameAliasConfig.class);
+    private final ObjectMapper objectMapper;
+    private final String aliasesJson;
+    private Map<String, String> aliases = new HashMap<>();
     
-    location / {
-        # Proxy to Solace
-        proxy_pass http://solace-server:port;
+    public HostnameAliasConfig(
+            ObjectMapper objectMapper,
+            @Value("${app.hostname.aliases-json:{}}") String aliasesJson) {
         
-        # HTTP settings
-        proxy_http_version 1.1;
-        proxy_set_header Connection "";
+        this.objectMapper = objectMapper;
+        this.aliasesJson = aliasesJson;
         
-        # Enable keepalive to upstream
-        proxy_connect_keepalive on;
-        proxy_socket_keepalive on;
-        
-        # Timeout settings
-        proxy_read_timeout 300s;
-        proxy_send_timeout 300s;
-        proxy_keepalive_timeout 180s;
-        
-        # Buffer settings if needed
-        proxy_buffer_size 8k;
-        proxy_buffers 8 8k;
+        try {
+            // Parse the JSON string into our map
+            this.aliases = objectMapper.readValue(
+                aliasesJson, 
+                objectMapper.getTypeFactory().constructMapType(
+                    HashMap.class, String.class, String.class
+                )
+            );
+            logger.info("Loaded {} hostname aliases", aliases.size());
+        } catch (Exception e) {
+            logger.error("Failed to parse hostname aliases JSON", e);
+            // Initialize with empty map if parsing fails
+            this.aliases = new HashMap<>();
+        }
+    }
+    
+    public Map<String, String> getAliases() {
+        return aliases;
+    }
+    
+    public String getAliasForHostname(String hostname) {
+        return aliases.getOrDefault(hostname, hostname);
     }
 }
-Monitoring and Verification
-After applying these changes:
-
-Monitor network traffic between components using tools like tcpdump or Wireshark to confirm keepalive packets are flowing properly
-Check Nginx error logs for any connection-related issues
-Check Solace logs for connection drop reasons
-Consider implementing application-level heartbeats in addition to TCP keepalives for more resilient connections
-
-These adjustments should significantly reduce or eliminate the "TCP Keep-Alive Failure" disconnections by ensuring that all components have compatible settings and that connections are properly maintained even during idle periods.
