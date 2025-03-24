@@ -1,63 +1,51 @@
-export ALIAS_MAP="hkpassol001=dce-prd-a,sgpassol001=dce-prd-b"
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Component;
+package com.yourcompany.config;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.context.annotation.Configuration;
+
 import java.util.HashMap;
 import java.util.Map;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
+import javax.annotation.PostConstruct;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 
-@Component
-public class AliasConfig {
+@Configuration
+@ConfigurationProperties(prefix = "app.hostname")
+public class HostnameAliasConfig {
     
-    private final Map<String, String> aliasMap;
-
-    public AliasConfig(@Value("${ALIAS_MAP:}") String aliasConfig) {
-        aliasMap = aliasConfig.isEmpty() ? new HashMap<>() :
-            Stream.of(aliasConfig.split(","))
-                  .map(entry -> entry.split("="))
-                  .collect(Collectors.toMap(e -> e[0], e -> e[1]));
-    }
-
-    public String getAlias(String host) {
-        return aliasMap.getOrDefault(host, host);
-    }
-}
-import com.fasterxml.jackson.annotation.JsonIgnore;
-import com.fasterxml.jackson.annotation.JsonProperty;
-
-public class MyModel {
+    private static final Logger logger = LoggerFactory.getLogger(HostnameAliasConfig.class);
+    private final ObjectMapper objectMapper = new ObjectMapper();
     
-    @JsonIgnore
-    private String host;
-
-    @JsonProperty("alias")
-    private String alias;
-
-    public MyModel(String host, AliasConfig aliasConfig) {
-        this.host = host;
-        this.alias = aliasConfig.getAlias(host);
+    @Value("${app.hostname.aliases-json:{}}")
+    private String aliasesJson;
+    
+    private Map<String, String> aliases = new HashMap<>();
+    
+    @PostConstruct
+    public void init() {
+        try {
+            // Parse the JSON string into our map
+            aliases = objectMapper.readValue(
+                aliasesJson, 
+                objectMapper.getTypeFactory().constructMapType(
+                    HashMap.class, String.class, String.class
+                )
+            );
+            logger.info("Loaded {} hostname aliases", aliases.size());
+        } catch (Exception e) {
+            logger.error("Failed to parse hostname aliases JSON", e);
+            // Initialize with empty map if parsing fails
+            aliases = new HashMap<>();
+        }
     }
-
-    public String getAlias() {
-        return alias;
+    
+    public Map<String, String> getAliases() {
+        return aliases;
     }
-}
-@Service
-public class MyService {
-
-    private final AliasConfig aliasConfig;
-
-    @Autowired
-    public MyService(AliasConfig aliasConfig) {
-        this.aliasConfig = aliasConfig;
-    }
-
-    public void indexData(MyModel model) {
-        // Transform before sending
-        String alias = aliasConfig.getAlias(model.getHost());
-        model.setAlias(alias);
-        
-        // Send to Elasticsearch (pseudo-code)
-        // elasticsearchClient.index(model);
+    
+    public String getAliasForHostname(String hostname) {
+        return aliases.getOrDefault(hostname, hostname);
     }
 }
