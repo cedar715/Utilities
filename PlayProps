@@ -1,52 +1,15 @@
-package com.yourcompany.config;
+❌ Solace SMF Port Unreachable on {{ $labels.instance }}
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.context.annotation.Configuration;
+❌ Solace SMF Port Unreachable
 
-import java.util.HashMap;
-import java.util.Map;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
+The TCP probe to the Solace PubSub+ SMF port (55555) has failed for the following instance:
 
-@Configuration
-@ConfigurationProperties(prefix = "app.hostname")
-public class HostnameAliasConfig {
-    
-    private static final Logger logger = LoggerFactory.getLogger(HostnameAliasConfig.class);
-    private final ObjectMapper objectMapper;
-    private final String aliasesJson;
-    private Map<String, String> aliases = new HashMap<>();
-    
-    public HostnameAliasConfig(
-            ObjectMapper objectMapper,
-            @Value("${app.hostname.aliases-json:{}}") String aliasesJson) {
-        
-        this.objectMapper = objectMapper;
-        this.aliasesJson = aliasesJson;
-        
-        try {
-            // Parse the JSON string into our map
-            this.aliases = objectMapper.readValue(
-                aliasesJson, 
-                objectMapper.getTypeFactory().constructMapType(
-                    HashMap.class, String.class, String.class
-                )
-            );
-            logger.info("Loaded {} hostname aliases", aliases.size());
-        } catch (Exception e) {
-            logger.error("Failed to parse hostname aliases JSON", e);
-            // Initialize with empty map if parsing fails
-            this.aliases = new HashMap<>();
-        }
-    }
-    
-    public Map<String, String> getAliases() {
-        return aliases;
-    }
-    
-    public String getAliasForHostname(String hostname) {
-        return aliases.getOrDefault(hostname, hostname);
-    }
-}
+🔹 Instance: {{ $labels.instance }}
+🔹 Service ID: {{ index $labels "service.instance.id" }}
+🔹 Environment: {{ index $labels "environment" }}
+
+This indicates that the SMF port is not reachable, which may impact client connectivity.
+
+🕒 Time: {{ $externalLabels.alert_time | default "N/A" }}
+
+📌 Please verify that the broker is running, the SMF port is open, and the network path is clear.
