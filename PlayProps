@@ -1,15 +1,1 @@
-❌ Solace SMF Port Unreachable on {{ $labels.instance }}
-
-❌ Solace SMF Port Unreachable
-
-The TCP probe to the Solace PubSub+ SMF port (55555) has failed for the following instance:
-
-🔹 Instance: {{ $labels.instance }}
-🔹 Service ID: {{ index $labels "service.instance.id" }}
-🔹 Environment: {{ index $labels "environment" }}
-
-This indicates that the SMF port is not reachable, which may impact client connectivity.
-
-🕒 Time: {{ $externalLabels.alert_time | default "N/A" }}
-
-📌 Please verify that the broker is running, the SMF port is open, and the network path is clear.
+🌐❌
