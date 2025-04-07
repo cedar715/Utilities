@@ -1,1 +1,27 @@
-🧭
+private Map<String, String> findDiscoveryLabels(final Map<String, String> queryParams) {
+    if (MapUtils.isEmpty(queryParams)) {
+        return Map.of();
+    }
+    
+    // Get configured discovery labels
+    String discoveryLabelsStr = Optional.ofNullable(controlPlaneConfig.getDiscoveryLabels())
+            .orElse("");
+            
+    // Parse the configured labels into a map of allowed keys
+    var configuredLabelKeys = Arrays.stream(discoveryLabelsStr.split(","))
+            .filter(pair -> pair.contains("="))
+            .map(pair -> pair.split("=")[0].trim())
+            .collect(Collectors.toSet());
+            
+    System.out.printf("Discovery Label Keys: %s%n", configuredLabelKeys);
+    
+    // Filter queryParams to only include keys that are in the configured labels
+    return queryParams.entrySet().stream()
+            .filter(entry -> configuredLabelKeys.contains(entry.getKey()))
+            .collect(Collectors.toMap(
+                Map.Entry::getKey,
+                Map.Entry::getValue,
+                (v1, v2) -> v2,  // In case of duplicate keys (shouldn't happen)
+                HashMap::new
+            ));
+}
