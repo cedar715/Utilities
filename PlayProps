@@ -1,25 +1,14 @@
 public boolean hasValidLabels(final Map<String, Object> metadata, final Map<String, String> labels) {
-    // First check: ensure every label key exists in metadata
-    for (String labelKey : labels.keySet()) {
-        if (!metadata.containsKey(labelKey)) {
-            return false; // Missing key in metadata
-        }
-    }
-    
-    // Second check: ensure every shared key has matching values
+    if (metadata == null || labels == null) return false;
+
     for (Map.Entry<String, String> entry : labels.entrySet()) {
         final String labelKey = entry.getKey();
         final String labelValue = entry.getValue();
-        
-        // Get metadata value and convert to string for comparison
+
         final Object metadataValueObj = metadata.get(labelKey);
-        final String metadataValue = metadataValueObj != null ? metadataValueObj.toString() : null;
-        
-        // If metadata value is null or doesn't match label value, return false
-        if (metadataValue == null || !labelValue.equals(metadataValue)) {
+        if (!Objects.equals(labelValue, Objects.toString(metadataValueObj, null))) {
             return false;
         }
     }
-    
     return true;
 }
