@@ -1,116 +1,43 @@
----
-- name: Deploy cAdvisor as a systemd service with Podman
-  hosts: target_vms
-  become: yes
-  vars:
-    cadvisor_version: "v0.51.0"
-    cadvisor_url: "https://artifactory.global.example.com/artifactory/vendor-generic-staging-local/cadvisor-{{ cadvisor_version }}-linux-amd64"
-    cadvisor_path: "/apps/cadvisor"
-    docker_socket: "/docker.sock"
-  
-  tasks:
-    - name: Get current user's UID
-      command: id -u
-      register: current_uid
-      changed_when: false
-      become: no
-      
-    - name: Get Podman socket path from podman info
-      shell: podman info --format '{% raw %}{{.Host.RemoteSocket.Path}}{% endraw %}'
-      register: podman_socket_path
-      changed_when: false
-      become: no
-      failed_when: false
-      
-    - name: Set default Podman socket path if command fails
-      set_fact:
-        podman_socket: "/run/user/{{ current_uid.stdout }}/podman/podman.sock"
-      when: podman_socket_path.rc != 0 or podman_socket_path.stdout == ""
-      
-    - name: Set Podman socket path from command output
-      set_fact:
-        podman_socket: "{{ podman_socket_path.stdout }}"
-      when: podman_socket_path.rc == 0 and podman_socket_path.stdout != ""
-      
-    - name: Display determined Podman socket path
-      debug:
-        msg: "Using Podman socket path: {{ podman_socket }}"
-    
-    - name: Create directory for cAdvisor
-      file:
-        path: "{{ cadvisor_path }}"
-        state: directory
-        mode: '0755'
-      
-    - name: Download cAdvisor binary
-      get_url:
-        url: "{{ cadvisor_url }}"
-        dest: "{{ cadvisor_path }}/cadvisor"
-        mode: '0755'
-      register: download_result
-      
-    - name: Check if podman socket exists
-      stat:
-        path: "{{ podman_socket }}"
-      register: podman_socket_stat
-      
-    - name: Fail if podman socket doesn't exist
-      fail:
-        msg: "Podman socket not found at {{ podman_socket }}. Please check your Podman installation."
-      when: not podman_socket_stat.stat.exists
-      
-    - name: Create systemd service file for cAdvisor
-      template:
-        src: cadvisor.service.j2
-        dest: /etc/systemd/system/cadvisor.service
-        mode: '0644'
-      vars:
-        podman_socket_path: "{{ podman_socket }}"
-      register: service_file
-      
-    - name: Create cadvisor service template
-      copy:
-        dest: cadvisor.service.j2
-        content: |
-          [Unit]
-          Description=cAdvisor monitoring service
-          Documentation=https://github.com/google/cadvisor
-          After=network.target
-          
-          [Service]
-          Type=simple
-          ExecStart={{ cadvisor_path }}/cadvisor --podman unix:///{{ podman_socket_path }} --docker unix:///{{ docker_socket }}
-          Restart=always
-          RestartSec=10
-          
-          # Security hardening options
-          ProtectSystem=full
-          ProtectHome=true
-          PrivateTmp=true
-          NoNewPrivileges=true
-          
-          [Install]
-          WantedBy=multi-user.target
-      delegate_to: localhost
-      run_once: true
-      
-    - name: Reload systemd to recognize new service
-      systemd:
-        daemon_reload: yes
-      when: service_file.changed
-      
-    - name: Enable and start cAdvisor service
-      systemd:
-        name: cadvisor
-        state: started
-        enabled: yes
-      
-    - name: Verify cAdvisor service is running
-      systemd:
-        name: cadvisor
-        state: started
-      register: cadvisor_service
-      
-    - name: Show status of cAdvisor service
-      debug:
-        msg: "cAdvisor service is {{ cadvisor_service.status.ActiveState }}"
+[Unit]
+Description=cAdvisor Podman metrics exporter
+Documentation=https://github.com/google/cadvisor
+After=network.target
+# If you have a specific podman socket service that must be available first, add:
+# Requires=podman.socket
+# After=podman.socket network.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10s
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+# Generate environment file with dynamic UID/GID for the service user
+ExecStartPre=/bin/bash -c '\
+  echo "USER_ID=$(id -u {{solace_local_service_user}})" > /home/{{solace_local_service_user}}/etc_solace/solace-user.conf && \
+  echo "GROUP_ID=$(id -g {{solace_local_service_user}})" >> /home/{{solace_local_service_user}}/etc_solace/solace-user.conf \
+'
+ExecStartPre=/bin/test -f /home/{{solace_local_service_user}}/etc_solace/solace-user.conf
+
+# Load environment with USER_ID and GROUP_ID
+EnvironmentFile=/home/{{solace_local_service_user}}/etc_solace/solace-user.conf
+
+# Direct execution of cAdvisor binary with connection to Podman socket
+ExecStart={{cadvisor_path}} --podman "unix://{{podman_socket_path}}"
+
+# Resource limits to prevent excessive resource consumption
+MemoryLimit=1G
+CPUQuota=200%
+
+# Security hardening options
+ProtectSystem=full
+PrivateTmp=true
+NoNewPrivileges=true
+
+# Output logs to journald for easy access with journalctl
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
