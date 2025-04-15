@@ -1,14 +1,79 @@
-public boolean hasValidLabels(final Map<String, Object> metadata, final Map<String, String> labels) {
-    if (metadata == null || labels == null) return false;
-
-    for (Map.Entry<String, String> entry : labels.entrySet()) {
-        final String labelKey = entry.getKey();
-        final String labelValue = entry.getValue();
-
-        final Object metadataValueObj = metadata.get(labelKey);
-        if (!Objects.equals(labelValue, Objects.toString(metadataValueObj, null))) {
-            return false;
-        }
-    }
-    return true;
-}
+---
+- name: Deploy cAdvisor as a Podman container
+  hosts: target_vms
+  become: yes
+  vars:
+    cadvisor_version: "v0.51.0"
+    cadvisor_url: "https://artifactory.global.example.com/artifactory/vendor-generic-staging-local/cadvisor-{{ cadvisor_version }}-linux-amd64"
+    cadvisor_path: "/apps/cadvisor"
+    docker_socket: "/docker.sock"
+  
+  tasks:
+    - name: Get current user's UID
+      command: id -u
+      register: current_uid
+      changed_when: false
+      become: no
+      
+    - name: Get Podman socket path from podman info
+      shell: podman info --format '{% raw %}{{.Host.RemoteSocket.Path}}{% endraw %}'
+      register: podman_socket_path
+      changed_when: false
+      become: no
+      failed_when: false
+      
+    - name: Set default Podman socket path if command fails
+      set_fact:
+        podman_socket: "/run/user/{{ current_uid.stdout }}/podman/podman.sock"
+      when: podman_socket_path.rc != 0 or podman_socket_path.stdout == ""
+      
+    - name: Set Podman socket path from command output
+      set_fact:
+        podman_socket: "{{ podman_socket_path.stdout }}"
+      when: podman_socket_path.rc == 0 and podman_socket_path.stdout != ""
+      
+    - name: Display determined Podman socket path
+      debug:
+        msg: "Using Podman socket path: {{ podman_socket }}"
+    
+    - name: Create directory for cAdvisor
+      file:
+        path: "{{ cadvisor_path }}"
+        state: directory
+        mode: '0755'
+      
+    - name: Download cAdvisor binary
+      get_url:
+        url: "{{ cadvisor_url }}"
+        dest: "{{ cadvisor_path }}/cadvisor"
+        mode: '0755'
+      register: download_result
+      
+    - name: Check if podman socket exists
+      stat:
+        path: "{{ podman_socket }}"
+      register: podman_socket_stat
+      
+    - name: Fail if podman socket doesn't exist
+      fail:
+        msg: "Podman socket not found at {{ podman_socket }}. Please check your Podman installation."
+      when: not podman_socket_stat.stat.exists
+      
+    - name: Run cAdvisor as a podman container
+      shell: >
+        nohup {{ cadvisor_path }}/cadvisor --podman unix:///{{ podman_socket }} --docker unix:///{{ docker_socket }} >/dev/null 2>&1 &
+      args:
+        executable: /bin/bash
+      async: 45
+      poll: 0
+      
+    - name: Verify cAdvisor is running
+      shell: pgrep -f cadvisor
+      register: cadvisor_process
+      ignore_errors: yes
+      changed_when: false
+      
+    - name: Show status of cAdvisor
+      debug:
+        msg: "cAdvisor is running with PID {{ cadvisor_process.stdout }}"
+      when: cadvisor_process.rc == 0
