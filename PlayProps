@@ -1,5 +1,5 @@
 ---
-- name: Deploy cAdvisor as a Podman container
+- name: Deploy cAdvisor as a systemd service with Podman
   hosts: target_vms
   become: yes
   vars:
@@ -59,21 +59,58 @@
         msg: "Podman socket not found at {{ podman_socket }}. Please check your Podman installation."
       when: not podman_socket_stat.stat.exists
       
-    - name: Run cAdvisor as a podman container
-      shell: >
-        nohup {{ cadvisor_path }}/cadvisor --podman unix:///{{ podman_socket }} --docker unix:///{{ docker_socket }} >/dev/null 2>&1 &
-      args:
-        executable: /bin/bash
-      async: 45
-      poll: 0
+    - name: Create systemd service file for cAdvisor
+      template:
+        src: cadvisor.service.j2
+        dest: /etc/systemd/system/cadvisor.service
+        mode: '0644'
+      vars:
+        podman_socket_path: "{{ podman_socket }}"
+      register: service_file
       
-    - name: Verify cAdvisor is running
-      shell: pgrep -f cadvisor
-      register: cadvisor_process
-      ignore_errors: yes
-      changed_when: false
+    - name: Create cadvisor service template
+      copy:
+        dest: cadvisor.service.j2
+        content: |
+          [Unit]
+          Description=cAdvisor monitoring service
+          Documentation=https://github.com/google/cadvisor
+          After=network.target
+          
+          [Service]
+          Type=simple
+          ExecStart={{ cadvisor_path }}/cadvisor --podman unix:///{{ podman_socket_path }} --docker unix:///{{ docker_socket }}
+          Restart=always
+          RestartSec=10
+          
+          # Security hardening options
+          ProtectSystem=full
+          ProtectHome=true
+          PrivateTmp=true
+          NoNewPrivileges=true
+          
+          [Install]
+          WantedBy=multi-user.target
+      delegate_to: localhost
+      run_once: true
       
-    - name: Show status of cAdvisor
+    - name: Reload systemd to recognize new service
+      systemd:
+        daemon_reload: yes
+      when: service_file.changed
+      
+    - name: Enable and start cAdvisor service
+      systemd:
+        name: cadvisor
+        state: started
+        enabled: yes
+      
+    - name: Verify cAdvisor service is running
+      systemd:
+        name: cadvisor
+        state: started
+      register: cadvisor_service
+      
+    - name: Show status of cAdvisor service
       debug:
-        msg: "cAdvisor is running with PID {{ cadvisor_process.stdout }}"
-      when: cadvisor_process.rc == 0
+        msg: "cAdvisor service is {{ cadvisor_service.status.ActiveState }}"
