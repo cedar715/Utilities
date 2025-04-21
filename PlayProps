@@ -1,80 +1,43 @@
-{{- if .Values.syslogCollector.enabled -}}
-{{- range $i := until (int .Values.syslogCollector.instances) -}}
-{{- $instanceIndex := add $i 1 -}}
-{{- $instanceName := include "syslog-collector.instanceName" $instanceIndex -}}
-{{- $instancePort := include "syslog-collector.instancePort" $instanceIndex -}}
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: {{ $instanceName }}
-  labels:
-    {{- include "syslog-collector.labels" $instanceIndex | nindent 4 }}
-spec:
-  replicas: 1  # Each deployment has exactly 1 replica
-  selector:
-    matchLabels:
-      {{- include "syslog-collector.selectorLabels" $instanceIndex | nindent 6 }}
-  template:
-    metadata:
-      labels:
-        {{- include "syslog-collector.selectorLabels" $instanceIndex | nindent 8 }}
-      annotations:
-        {{- with $.Values.syslogCollector.podAnnotations }}
-        {{- toYaml . | nindent 8 }}
-        {{- end }}
-        {{- range $.Values.syslogCollector.instanceOverrides }}
-        {{- if eq (int .instanceIndex) $instanceIndex }}
-        {{- with .annotations }}
-        {{- toYaml . | nindent 8 }}
-        {{- end }}
-        {{- end }}
-        {{- end }}
-    spec:
-      {{- with $.Values.syslogCollector.securityContext }}
-      securityContext:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      containers:
-        - name: {{ $instanceName }}
-          image: "{{ $.Values.global.image.repository }}:{{ $.Values.global.image.tag }}"
-          imagePullPolicy: {{ $.Values.global.image.pullPolicy }}
-          ports:
-            - name: syslog
-              containerPort: {{ $instancePort }}
-              protocol: UDP
-            - name: syslog-tcp
-              containerPort: {{ $instancePort }}
-              protocol: TCP
-            - name: metrics
-              containerPort: 9102
-              protocol: TCP
-          env:
-            - name: SYSLOG_PORT
-              value: "{{ $instancePort }}"
-            - name: INSTANCE_NAME
-              value: "{{ $instanceName }}"
-            - name: SOLACE_HA_INSTANCE
-              value: "{{ $instanceIndex }}"
-            {{- range $.Values.syslogCollector.instanceOverrides }}
-            {{- if eq (int .instanceIndex) $instanceIndex }}
-            {{- with .env }}
-            {{- toYaml . | nindent 12 }}
-            {{- end }}
-            {{- end }}
-            {{- end }}
-          resources:
-            {{- include "syslog-collector.resources" $instanceIndex | nindent 12 }}
-          {{- with $.Values.syslogCollector.containerConfig }}
-          {{- toYaml . | nindent 10 }}
-          {{- end }}
-          volumeMounts:
-            - name: secrets
-              mountPath: {{ $.Values.syslogCollector.secretVolume.mountPath }}
-              readOnly: true
-      volumes:
-        - name: secrets
-          secret:
-            secretName: {{ $.Values.syslogCollector.secretVolume.name }}
+{{/* Generate instance name based on the index */}}
+{{- define "syslog-collector.instanceName" -}}
+{{- printf $.Values.syslogCollector.namingPattern (int .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{/* Generate port for an instance based on the index */}}
+{{- define "syslog-collector.instancePort" -}}
+{{- add $.Values.syslogCollector.basePort (int .) -}}
+{{- end -}}
+
+{{/* Get label selector for a specific instance */}}
+{{- define "syslog-collector.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "syslog-collector.instanceName" . }}
+app.kubernetes.io/instance: {{ $.Release.Name }}
+syslog-collector-index: "{{ . }}"
+{{- end -}}
+
+{{/* Get all common labels for resources */}}
+{{- define "syslog-collector.labels" -}}
+helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+{{ include "syslog-collector.selectorLabels" . }}
+{{- if $.Chart.AppVersion }}
+app.kubernetes.io/version: {{ $.Chart.AppVersion | quote }}
 {{- end }}
-{{- end }}
+app.kubernetes.io/managed-by: {{ $.Release.Service }}
+app.kubernetes.io/component: syslog-collector
+{{- end -}}
+
+{{/* Get container resources for an instance */}}
+{{- define "syslog-collector.resources" -}}
+{{- $instanceIndex := (int .) -}}
+{{- $override := dict -}}
+{{- range $.Values.syslogCollector.instanceOverrides -}}
+  {{- if eq (int .instanceIndex) $instanceIndex -}}
+    {{- $override = .resources -}}
+  {{- end -}}
+{{- end -}}
+{{- if $override -}}
+{{- toYaml $override -}}
+{{- else -}}
+{{- toYaml $.Values.global.resources -}}
+{{- end -}}
+{{- end -}}
