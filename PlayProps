@@ -1,21 +1,9 @@
-{{- range $i := until (int .Values.syslogCollector.instances) -}}
-{{- $instanceIndex := add $i 1 -}}
-{{- $instanceName := include "syslog-collector.instanceName" (list $ $instanceIndex) -}}
-{{- $instancePort := include "syslog-collector.instancePort" (list $ $instanceIndex) -}}
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: {{ $instanceName }}
-  labels:
-    {{- include "syslog-collector.labels" (list $ $instanceIndex) | nindent 4 }}
-spec:
-  # ... rest of the template
-  selector:
-    matchLabels:
-      {{- include "syslog-collector.selectorLabels" (list $ $instanceIndex) | nindent 6 }}
-  template:
-    metadata:
-      labels:
-        {{- include "syslog-collector.selectorLabels" (list $ $instanceIndex) | nindent 8 }}
-        # ... additional labels
+{{/* templates/_helpers.tpl */}}
+{{- define "mychart.fullname" -}}
+my-instance-{{ index . 1 }}
+{{- end -}}
+
+
+{{- $index := 1 -}}
+{{- $name := include "mychart.fullname" (tuple $ $index) -}}
+name: {{ $name }}
