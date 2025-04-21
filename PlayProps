@@ -1,43 +1,31 @@
-{{/* Generate instance name based on the index */}}
-{{- define "syslog-collector.instanceName" -}}
-{{- printf $.Values.syslogCollector.namingPattern (int .) | trunc 63 | trimSuffix "-" -}}
-{{- end -}}
-
-{{/* Generate port for an instance based on the index */}}
-{{- define "syslog-collector.instancePort" -}}
-{{- add $.Values.syslogCollector.basePort (int .) -}}
-{{- end -}}
-
-{{/* Get label selector for a specific instance */}}
-{{- define "syslog-collector.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "syslog-collector.instanceName" . }}
-app.kubernetes.io/instance: {{ $.Release.Name }}
-syslog-collector-index: "{{ . }}"
-{{- end -}}
-
-{{/* Get all common labels for resources */}}
-{{- define "syslog-collector.labels" -}}
-helm.sh/chart: {{ printf "%s-%s" $.Chart.Name $.Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
-{{ include "syslog-collector.selectorLabels" . }}
-{{- if $.Chart.AppVersion }}
-app.kubernetes.io/version: {{ $.Chart.AppVersion | quote }}
+{{- if .Values.syslogCollector.enabled -}}
+{{- range $i := until (int .Values.syslogCollector.instances) -}}
+{{- $instanceIndex := add $i 1 -}}
+{{- $instanceName := include "syslog-collector.instanceName" $instanceIndex -}}
+{{- $instancePort := include "syslog-collector.instancePort" $instanceIndex -}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $instanceName }}
+  labels:
+    {{- include "syslog-collector.labels" $instanceIndex | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ $instancePort }}
+      targetPort: syslog
+      protocol: UDP
+      name: syslog-udp
+    - port: {{ $instancePort }}
+      targetPort: syslog-tcp
+      protocol: TCP
+      name: syslog-tcp
+    - port: 9102
+      targetPort: metrics
+      protocol: TCP
+      name: metrics
+  selector:
+    {{- include "syslog-collector.selectorLabels" $instanceIndex | nindent 4 }}
 {{- end }}
-app.kubernetes.io/managed-by: {{ $.Release.Service }}
-app.kubernetes.io/component: syslog-collector
-{{- end -}}
-
-{{/* Get container resources for an instance */}}
-{{- define "syslog-collector.resources" -}}
-{{- $instanceIndex := (int .) -}}
-{{- $override := dict -}}
-{{- range $.Values.syslogCollector.instanceOverrides -}}
-  {{- if eq (int .instanceIndex) $instanceIndex -}}
-    {{- $override = .resources -}}
-  {{- end -}}
-{{- end -}}
-{{- if $override -}}
-{{- toYaml $override -}}
-{{- else -}}
-{{- toYaml $.Values.global.resources -}}
-{{- end -}}
-{{- end -}}
+{{- end }}
