@@ -1,31 +1,22 @@
-{{/* Generate instance name based on the index */}}
-{{- define "syslog-collector.instanceName" -}}
+{{/* Generate syslog collector instance name based on the index */}}
+{{- define "chart.syslog.instanceName" -}}
 {{- printf $.Values.syslogCollector.namingPattern (int .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
-{{/* Generate port for an instance based on the index */}}
-{{- define "syslog-collector.instancePort" -}}
+{{/* Generate port for a syslog instance based on the index */}}
+{{- define "chart.syslog.instancePort" -}}
 {{- add $.Values.syslogCollector.basePort (int .) -}}
 {{- end -}}
 
-{{/* Get label selector for a specific instance */}}
-{{- define "syslog-collector.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "syslog-collector.instanceName" . }}
+{{/* Get syslog label selector for a specific instance */}}
+{{- define "chart.syslog.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "chart.syslog.instanceName" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
+app.kubernetes.io/component: syslog-collector
 {{- end -}}
 
-{{/* Get all common labels for resources */}}
-{{- define "syslog-collector.labels" -}}
-helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
-{{ include "syslog-collector.selectorLabels" . }}
-{{- if .Chart.AppVersion }}
-app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
-{{- end }}
-app.kubernetes.io/managed-by: {{ .Release.Service }}
-{{- end -}}
-
-{{/* Get container resources for an instance */}}
-{{- define "syslog-collector.resources" -}}
+{{/* Get syslog container resources for an instance */}}
+{{- define "chart.syslog.resources" -}}
 {{- $instanceIndex := (int .) -}}
 {{- $override := dict -}}
 {{- range $.Values.syslogCollector.instanceOverrides -}}
