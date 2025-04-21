@@ -1,1 +1,41 @@
+{{/* Generate instance name based on the index */}}
+{{- define "syslog-collector.instanceName" -}}
+{{- printf $.Values.syslogCollector.namingPattern (int .) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
 
+{{/* Generate port for an instance based on the index */}}
+{{- define "syslog-collector.instancePort" -}}
+{{- add $.Values.syslogCollector.basePort (int .) -}}
+{{- end -}}
+
+{{/* Get label selector for a specific instance */}}
+{{- define "syslog-collector.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "syslog-collector.instanceName" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end -}}
+
+{{/* Get all common labels for resources */}}
+{{- define "syslog-collector.labels" -}}
+helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+{{ include "syslog-collector.selectorLabels" . }}
+{{- if .Chart.AppVersion }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end -}}
+
+{{/* Get container resources for an instance */}}
+{{- define "syslog-collector.resources" -}}
+{{- $instanceIndex := (int .) -}}
+{{- $override := dict -}}
+{{- range $.Values.syslogCollector.instanceOverrides -}}
+  {{- if eq (int .instanceIndex) $instanceIndex -}}
+    {{- $override = .resources -}}
+  {{- end -}}
+{{- end -}}
+{{- if $override -}}
+{{- toYaml $override -}}
+{{- else -}}
+{{- toYaml $.Values.global.resources -}}
+{{- end -}}
+{{- end -}}
