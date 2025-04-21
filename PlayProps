@@ -1,76 +1,80 @@
-# Global settings
-global:
-  image:
-    repository: your-registry/syslog-collector
-    tag: latest
-    pullPolicy: IfNotPresent
-  
-  # Common resource settings
-  resources:
-    limits:
-      cpu: 500m
-      memory: 512Mi
-    requests:
-      cpu: 200m
-      memory: 256Mi
-
-# Syslog collector configuration
-syslogCollector:
-  # Enable or disable the entire collector setup
-  enabled: true
-  
-  # Define the number of instances to create (1-5)
-  instances: 5
-  
-  # Base port number - will be incremented for each instance
-  basePort: 5140
-  
-  # Naming pattern for instances
-  namingPattern: "dceprd%d-syslog-collector"
-  
-  # Volume configuration
-  secretVolume:
-    name: "syslog-collector-secrets"
-    mountPath: "/etc/syslog-collector/secrets"
-  
-  # Container configuration (can be overridden per instance)
-  containerConfig:
-    livenessProbe:
-      tcpSocket:
-        port: http
-      initialDelaySeconds: 30
-      periodSeconds: 10
-    readinessProbe:
-      tcpSocket:
-        port: http
-      initialDelaySeconds: 5
-      periodSeconds: 10
-  
-  # Pod security context
-  securityContext:
-    runAsUser: 1000
-    runAsGroup: 1000
-    fsGroup: 1000
-  
-  # Pod annotations
-  podAnnotations:
-    prometheus.io/scrape: "true"
-    prometheus.io/port: "metrics"
-  
-  # Per-instance configurations (optional overrides)
-  # These will override the default settings for specific instances
-  instanceOverrides:
-    # Example: Customize the first instance
-    - instanceIndex: 1
-      resources:
-        limits:
-          cpu: 1000m
-          memory: 1Gi
+{{- if .Values.syslogCollector.enabled -}}
+{{- range $i := until (int .Values.syslogCollector.instances) -}}
+{{- $instanceIndex := add $i 1 -}}
+{{- $instanceName := include "syslog-collector.instanceName" $instanceIndex -}}
+{{- $instancePort := include "syslog-collector.instancePort" $instanceIndex -}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $instanceName }}
+  labels:
+    {{- include "syslog-collector.labels" $instanceIndex | nindent 4 }}
+spec:
+  replicas: 1  # Each deployment has exactly 1 replica
+  selector:
+    matchLabels:
+      {{- include "syslog-collector.selectorLabels" $instanceIndex | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "syslog-collector.selectorLabels" $instanceIndex | nindent 8 }}
       annotations:
-        special-annotation: "value-for-instance-1"
-    
-    # Example: Customize the second instance
-    - instanceIndex: 2
-      env:
-        - name: SPECIAL_CONFIG
-          value: "special-value-for-instance-2"
+        {{- with $.Values.syslogCollector.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- range $.Values.syslogCollector.instanceOverrides }}
+        {{- if eq (int .instanceIndex) $instanceIndex }}
+        {{- with .annotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- end }}
+        {{- end }}
+    spec:
+      {{- with $.Values.syslogCollector.securityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ $instanceName }}
+          image: "{{ $.Values.global.image.repository }}:{{ $.Values.global.image.tag }}"
+          imagePullPolicy: {{ $.Values.global.image.pullPolicy }}
+          ports:
+            - name: syslog
+              containerPort: {{ $instancePort }}
+              protocol: UDP
+            - name: syslog-tcp
+              containerPort: {{ $instancePort }}
+              protocol: TCP
+            - name: metrics
+              containerPort: 9102
+              protocol: TCP
+          env:
+            - name: SYSLOG_PORT
+              value: "{{ $instancePort }}"
+            - name: INSTANCE_NAME
+              value: "{{ $instanceName }}"
+            - name: SOLACE_HA_INSTANCE
+              value: "{{ $instanceIndex }}"
+            {{- range $.Values.syslogCollector.instanceOverrides }}
+            {{- if eq (int .instanceIndex) $instanceIndex }}
+            {{- with .env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
+          resources:
+            {{- include "syslog-collector.resources" $instanceIndex | nindent 12 }}
+          {{- with $.Values.syslogCollector.containerConfig }}
+          {{- toYaml . | nindent 10 }}
+          {{- end }}
+          volumeMounts:
+            - name: secrets
+              mountPath: {{ $.Values.syslogCollector.secretVolume.mountPath }}
+              readOnly: true
+      volumes:
+        - name: secrets
+          secret:
+            secretName: {{ $.Values.syslogCollector.secretVolume.name }}
+{{- end }}
+{{- end }}
