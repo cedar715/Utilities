@@ -1,42 +1,51 @@
-{{/* Generate instance name based on the index */}}
-{{- define "syslog-collector.instanceName" -}}
-{{- printf $.Values.syslogCollector.namingPattern (int .) | trunc 63 | trimSuffix "-" -}}
-{{- end -}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: relay-proxy-pod
+spec:
+  volumes:
+    - name: shared-secret
+      emptyDir: {}
 
-{{/* Generate port for an instance based on the index */}}
-{{- define "syslog-collector.instancePort" -}}
-{{- add $.Values.syslogCollector.basePort (int .) -}}
-{{- end -}}
+  initContainers:
+    - name: init-secret-reader
+      image: your-secret-reader-image:latest
+      command:
+        - sh
+        - -c
+        - |
+          echo "Fetching secret at startup..."
+          ./read-secret.sh > /secrets/credentials.json
+      volumeMounts:
+        - name: shared-secret
+          mountPath: /secrets
 
-{{/* Get label selector for a specific instance */}}
-{{- define "syslog-collector.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "syslog-collector.instanceName" . }}
-app.kubernetes.io/instance: {{ $.Release.Name }}
-syslog-collector-index: "{{ . }}"
-{{- end -}}
+  containers:
+    - name: relay-proxy
+      image: your-relay-proxy-image:latest
+      command:
+        - sh
+        - -c
+        - |
+          echo "Waiting for secret file..."
+          while [ ! -f /secrets/credentials.json ]; do sleep 1; done
+          echo "Starting relay proxy"
+          ./start-relay-proxy.sh /secrets/credentials.json
+      volumeMounts:
+        - name: shared-secret
+          mountPath: /secrets
 
-{{/* Get all common labels for resources */}}
-{{- define "syslog-collector.labels" -}}
-helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
-{{ include "syslog-collector.selectorLabels" . }}
-{{- if .Chart.AppVersion }}
-app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
-{{- end }}
-app.kubernetes.io/managed-by: {{ .Release.Service }}
-{{- end -}}
-
-{{/* Get container resources for an instance */}}
-{{- define "syslog-collector.resources" -}}
-{{- $instanceIndex := (int .) -}}
-{{- $override := dict -}}
-{{- range $.Values.syslogCollector.instanceOverrides -}}
-  {{- if eq (int .instanceIndex) $instanceIndex -}}
-    {{- $override = .resources -}}
-  {{- end -}}
-{{- end -}}
-{{- if $override -}}
-{{- toYaml $override -}}
-{{- else -}}
-{{- toYaml $.Values.global.resources -}}
-{{- end -}}
-{{- end -}}
+    - name: secret-refresher
+      image: your-secret-reader-image:latest
+      command:
+        - sh
+        - -c
+        - |
+          while true; do
+            echo "Refreshing secret..."
+            ./read-secret.sh > /secrets/credentials.json
+            sleep 300
+          done
+      volumeMounts:
+        - name: shared-secret
+          mountPath: /secrets
