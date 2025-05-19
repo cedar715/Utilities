@@ -1,51 +1,9 @@
-apiVersion: v1
-kind: Pod
-metadata:
-  name: relay-proxy-pod
-spec:
-  volumes:
-    - name: shared-secret
-      emptyDir: {}
-
-  initContainers:
-    - name: init-secret-reader
-      image: your-secret-reader-image:latest
-      command:
-        - sh
-        - -c
-        - |
-          echo "Fetching secret at startup..."
-          ./read-secret.sh > /secrets/credentials.json
-      volumeMounts:
-        - name: shared-secret
-          mountPath: /secrets
-
-  containers:
-    - name: relay-proxy
-      image: your-relay-proxy-image:latest
-      command:
-        - sh
-        - -c
-        - |
-          echo "Waiting for secret file..."
-          while [ ! -f /secrets/credentials.json ]; do sleep 1; done
-          echo "Starting relay proxy"
-          ./start-relay-proxy.sh /secrets/credentials.json
-      volumeMounts:
-        - name: shared-secret
-          mountPath: /secrets
-
-    - name: secret-refresher
-      image: your-secret-reader-image:latest
-      command:
-        - sh
-        - -c
-        - |
-          while true; do
-            echo "Refreshing secret..."
-            ./read-secret.sh > /secrets/credentials.json
-            sleep 300
-          done
-      volumeMounts:
-        - name: shared-secret
-          mountPath: /secrets
+sum by (host) (
+  (
+    increase(sol_event_system_system_shutdown_initiated_total[2h]) > 0
+  )
+  and on (host)
+  (
+    increase(sol_event_system_system_shutdown_initiated_total[15m]) > 0
+  )
+) > 0
