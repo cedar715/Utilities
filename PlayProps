@@ -1,1 +1,1 @@
-sum by (host) ((increase(sol_event_system_system_shutdown_initiated_total[2h]) > 0) and on (host) (increase(sol_event_system_system_shutdown_initiated_total[15m]) > 0)) > 0
+
