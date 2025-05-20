@@ -58,18 +58,22 @@ def search_yaml_files(folder_path, search_text):
 
 def write_output_to_file(subscriptions, output_path):
     """
-    Write the subscriptions list to a YAML file
+    Write the subscriptions list to a YAML file, with values quoted
     """
     unique_subscriptions = []
     for item in subscriptions:
         if item not in unique_subscriptions:
             unique_subscriptions.append(item)
 
-    data = {"subscriptions": unique_subscriptions}
-    
+    # Ensure all values are explicitly quoted
+    quoted_subscriptions = [f'"{item}"' for item in unique_subscriptions]
+
+    # Manually build the YAML-like output
     try:
         with open(output_path, 'w', encoding='utf-8') as f:
-            yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+            f.write("subscriptions:\n")
+            for sub in quoted_subscriptions:
+                f.write(f"- {sub}\n")
         print(f"\nResults written to {output_path}")
     except Exception as e:
         print(f"Failed to write output to file: {e}", file=sys.stderr)
