@@ -10,7 +10,7 @@ def find_subscriptions(data, results=None):
     """
     if results is None:
         results = []
-        
+
     if isinstance(data, Mapping):
         for key, value in data.items():
             if key == 'subscriptions' and isinstance(value, list):
@@ -21,7 +21,7 @@ def find_subscriptions(data, results=None):
         for item in data:
             if isinstance(item, (dict, list)):
                 find_subscriptions(item, results)
-                
+
     return results
 
 def search_yaml_files(folder_path, search_text):
@@ -30,61 +30,66 @@ def search_yaml_files(folder_path, search_text):
     and collect subscriptions from files where the text is found.
     """
     all_subscriptions = []
-    
-    # Get all yaml files in the folder
-    yaml_files = [f for f in os.listdir(folder_path) 
-                 if os.path.isfile(os.path.join(folder_path, f)) 
-                 and (f.endswith('.yaml') or f.endswith('.yml'))]
-    
+
+    yaml_files = [
+        f for f in os.listdir(folder_path)
+        if os.path.isfile(os.path.join(folder_path, f))
+        and (f.endswith('.yaml') or f.endswith('.yml'))
+    ]
+
     for file_name in yaml_files:
         file_path = os.path.join(folder_path, file_name)
         try:
-            # Read the file first as text to search for the string
-            with open(file_path, 'r') as file:
+            with open(file_path, 'r', encoding='utf-8') as file:
                 file_content = file.read()
-                
-            # If search text is found in the file
+
             if search_text in file_content:
-                # Parse the YAML and extract subscriptions
-                with open(file_path, 'r') as file:
-                    yaml_data = yaml.safe_load(file)
-                    
-                # Find all subscriptions in this file
-                file_subscriptions = find_subscriptions(yaml_data)
-                all_subscriptions.extend(file_subscriptions)
-                    
+                yaml_data = yaml.safe_load(file_content)
+                if yaml_data:
+                    file_subscriptions = find_subscriptions(yaml_data)
+                    all_subscriptions.extend(file_subscriptions)
+                    print(f"Found subscriptions in {file_name}")
+        except yaml.YAMLError as ye:
+            print(f"YAML error in file {file_name}: {str(ye)}", file=sys.stderr)
         except Exception as e:
             print(f"Error processing file {file_name}: {str(e)}", file=sys.stderr)
-    
+
     return all_subscriptions
 
-def format_output(subscriptions):
+def write_output_to_file(subscriptions, output_path):
     """
-    Format the subscriptions list in the requested output format
+    Write the subscriptions list to a YAML file
     """
-    # Remove duplicates while preserving order
     unique_subscriptions = []
     for item in subscriptions:
         if item not in unique_subscriptions:
             unique_subscriptions.append(item)
+
+    data = {"subscriptions": unique_subscriptions}
     
-    result = "subscriptions:\n"
-    for subscription in unique_subscriptions:
-        result += f"* {subscription}\n"
-    
-    return result
+    try:
+        with open(output_path, 'w', encoding='utf-8') as f:
+            yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+        print(f"\nResults written to {output_path}")
+    except Exception as e:
+        print(f"Failed to write output to file: {e}", file=sys.stderr)
 
 if __name__ == "__main__":
     if len(sys.argv) < 3:
         print("Usage: python script.py <folder_path> <search_text>")
+        print('Example: python script.py C:\\path\\to\\yaml\\folder "vpn: \\"my-vpn-name\\""')
         sys.exit(1)
-        
+
     folder_path = sys.argv[1]
     search_text = sys.argv[2]
-    
-    # Search files and collect subscriptions
+    output_file = os.path.join(os.path.dirname(__file__), "subscriptions_output.yaml")
+
+    print(f"Searching for '{search_text}' in {folder_path}...")
+
     subscriptions = search_yaml_files(folder_path, search_text)
-    
-    # Format and print the result
-    output = format_output(subscriptions)
-    print(output)
+
+    if not subscriptions:
+        print("No subscriptions found in any matching files.")
+        sys.exit(0)
+
+    write_output_to_file(subscriptions, output_file)
