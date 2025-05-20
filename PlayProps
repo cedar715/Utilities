@@ -1,5 +1,5 @@
-
 import yaml
+import os
 import sys
 from collections.abc import Mapping
 
@@ -24,32 +24,67 @@ def find_subscriptions(data, results=None):
                 
     return results
 
-def process_yaml_file(file_path):
+def search_yaml_files(folder_path, search_text):
     """
-    Process a YAML file to extract and consolidate all 'subscriptions' elements.
+    Search for the specified text in all YAML files in the given folder
+    and collect subscriptions from files where the text is found.
     """
-    try:
-        with open(file_path, 'r') as file:
-            yaml_data = yaml.safe_load(file)
-            
-        # Find all subscriptions
-        all_subscriptions = find_subscriptions(yaml_data)
-        
-        # Create output dictionary with consolidated subscriptions
-        output = {'subscriptions': all_subscriptions}
-        
-        # Convert back to YAML
-        consolidated_yaml = yaml.dump(output, default_flow_style=False, sort_keys=False)
-        
-        return consolidated_yaml
-    except Exception as e:
-        return f"Error processing file: {str(e)}"
+    all_subscriptions = []
+    
+    # Get all yaml files in the folder
+    yaml_files = [f for f in os.listdir(folder_path) 
+                 if os.path.isfile(os.path.join(folder_path, f)) 
+                 and (f.endswith('.yaml') or f.endswith('.yml'))]
+    
+    for file_name in yaml_files:
+        file_path = os.path.join(folder_path, file_name)
+        try:
+            # Read the file first as text to search for the string
+            with open(file_path, 'r') as file:
+                file_content = file.read()
+                
+            # If search text is found in the file
+            if search_text in file_content:
+                # Parse the YAML and extract subscriptions
+                with open(file_path, 'r') as file:
+                    yaml_data = yaml.safe_load(file)
+                    
+                # Find all subscriptions in this file
+                file_subscriptions = find_subscriptions(yaml_data)
+                all_subscriptions.extend(file_subscriptions)
+                    
+        except Exception as e:
+            print(f"Error processing file {file_name}: {str(e)}", file=sys.stderr)
+    
+    return all_subscriptions
+
+def format_output(subscriptions):
+    """
+    Format the subscriptions list in the requested output format
+    """
+    # Remove duplicates while preserving order
+    unique_subscriptions = []
+    for item in subscriptions:
+        if item not in unique_subscriptions:
+            unique_subscriptions.append(item)
+    
+    result = "subscriptions:\n"
+    for subscription in unique_subscriptions:
+        result += f"* {subscription}\n"
+    
+    return result
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python script.py <yaml_file_path>")
+    if len(sys.argv) < 3:
+        print("Usage: python script.py <folder_path> <search_text>")
         sys.exit(1)
         
-    file_path = sys.argv[1]
-    result = process_yaml_file(file_path)
-    print(result)
+    folder_path = sys.argv[1]
+    search_text = sys.argv[2]
+    
+    # Search files and collect subscriptions
+    subscriptions = search_yaml_files(folder_path, search_text)
+    
+    # Format and print the result
+    output = format_output(subscriptions)
+    print(output)
