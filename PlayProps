@@ -1,87 +1,23 @@
-To pull the age of the oldest message in a queue via SEMP v1 you essentially invoke the CLI’s `show queue <name> stats` over HTTP. Here’s how:
+import requests
+import xml.etree.ElementTree as ET
 
-1. **Create your XML request**
-   Make a file (e.g. `request.xml`) containing:
+# 1) POST the request
+r = requests.post(
+    "http://BROKER:8080/SEMP",
+    auth=("admin","password"),
+    data=open("request.xml","rb")
+)
+r.raise_for_status()
 
-   ```xml
-   <rpc>
-     <show>
-       <queue>
-         <queue-name>YOUR_QUEUE_NAME</queue-name>
-         <message-vpn>YOUR_VPN_NAME</message-vpn>
-         <stats/>
-       </queue>
-     </show>
-   </rpc>
-   ```
+# 2) Parse XML
+root = ET.fromstring(r.content)
 
-   This mirrors the CLI command `show queue <name> stats` ([Solace Docs][1]).
+# 3) Extract values
+last = int(root.findtext(".//last-message-id-spooled"))
+high = int(root.findtext(".//high-message-id-ack-received"))
+age = int(root.findtext(".//oldest-msg-age"))
 
-2. **Invoke it with `curl`**
+depth = last - high
 
-   ```bash
-   curl -s -u ADMIN_USER:ADMIN_PASS \
-        -d @request.xml \
-        http://BROKER_HOST:PORT/SEMP
-   ```
-
-   * **ADMIN\_USER\:ADMIN\_PASS** – your SEMP credentials
-   * **BROKER\_HOST\:PORT** – management interface (default 80 on appliance, 8080 on software) ([Solace Docs][2])
-
-3. **Extract the message-age**
-   The broker’s XML reply will include under `<rpc-reply><rpc><show><queue><stats>` elements like:
-
-   ```xml
-   <oldest-msg-age>3600</oldest-msg-age>
-   <oldest-msg-timestamp>2025-08-08T07:52:13.123Z</oldest-msg-timestamp>
-   ```
-
-   * `<oldest-msg-age>` is the age in **seconds** of the oldest enqueued message.
-   * `<oldest-msg-timestamp>` is its enqueue timestamp in ISO 8601.
-
-   Use a tool like `xmllint` or `xmlstarlet` to pull it out:
-
-   ```bash
-   # Seconds since enqueue:
-   curl … | xmllint --xpath 'string(//queue/stats/oldest-msg-age)' - 
-
-   # ISO timestamp:
-   curl … | xmllint --xpath 'string(//queue/stats/oldest-msg-timestamp)' -
-   ```
-
-   Replace `//queue/stats/...` with the exact path matching your broker’s XML schema.
-
----
-
-**Putting it all together** (example for a queue `ordersQueue` in VPN `salesVPN`):
-
-```bash
-cat > request.xml <<EOF
-<rpc>
-  <show>
-    <queue>
-      <queue-name>ordersQueue</queue-name>
-      <message-vpn>salesVPN</message-vpn>
-      <stats/>
-    </queue>
-  </show>
-</rpc>
-EOF
-
-# Get oldest-msg-age in seconds:
-curl -s -u admin:admin \
-     -d @request.xml \
-     http://solace-broker.example.com:8080/SEMP \
-  | xmllint --xpath 'string(//queue/stats/oldest-msg-age)' -
-
-# Get oldest-msg-timestamp:
-curl -s -u admin:admin \
-     -d @request.xml \
-     http://solace-broker.example.com:8080/SEMP \
-  | xmllint --xpath 'string(//queue/stats/oldest-msg-timestamp)' -
-```
-
-That’s it—by driving the CLI’s `show queue … stats` over SEMP v1 you can programmatically determine how long the oldest message has been sitting in your queue.
-
-[1]: https://docs.solace.com/Messaging/Guaranteed-Msg/Monitoring-Guaranteed-Messaging.htm?utm_source=chatgpt.com "Viewing Guaranteed Messaging Information"
-[2]: https://docs.solace.com/Admin/SEMP/Using-Legacy-SEMP.htm "Legacy SEMP"
+print(f"Messages in queue: {depth}")
+print(f"Oldest message age: {age} seconds")
