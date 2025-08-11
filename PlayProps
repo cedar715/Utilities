@@ -1,40 +1,6 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-BROKER="https://<host>:1943/SEMP"   # use HTTPS in prod
-USER="admin"; PASS="password"
-VPN="my-vpn"; QUEUE="my-queue"
-STATE_DIR="/var/tmp/solace-head"
-mkdir -p "$STATE_DIR"
-STATE_FILE="$STATE_DIR/${VPN}_${QUEUE}.state"
-
-REQ='<?xml version="1.0"?>
-<rpc><show><queue>
-  <name>'"$QUEUE"'</name>
-  <vpn-name>'"$VPN"'</vpn-name>
-  <messages/><oldest/><count/><num-elements>1</num-elements>
-</queue></show></rpc>'
-
-XML=$(curl -sS -u "$USER:$PASS" -H 'Content-Type: application/xml' -d "$REQ" "$BROKER")
-DEPTH=$(printf "%s" "$XML" | xmllint --xpath 'string(//spooled-messages/count)' - 2>/dev/null || echo "")
-HEAD=$(printf "%s" "$XML" | xmllint --xpath 'string(//spooled-messages/spooled-message[1]/message-id)' - 2>/dev/null || echo "")
-
-[[ -z "$DEPTH" || "$DEPTH" == "0" || -z "$HEAD" ]] && { echo "empty"; exit 0; }
-
-NOW=$(date +%s)
-if [[ -f "$STATE_FILE" ]]; then
-  read -r LAST_HEAD LAST_TS < "$STATE_FILE" || true
-else
-  LAST_HEAD=""; LAST_TS="$NOW"
-fi
-
-if [[ "$HEAD" != "${LAST_HEAD:-}" ]]; then
-  echo "$HEAD $NOW" > "$STATE_FILE"
-  AGE=0
-else
-  AGE=$(( NOW - ${LAST_TS:-$NOW} ))
-fi
-
-echo "depth=$DEPTH oldestId=$HEAD headUnchangedFor=${AGE}s"
-# exit non-zero if older than threshold, e.g., 900s:
-[[ $AGE -ge 900 ]] && exit 2 || exit 0
+. Exact Age via Queue Browsing (requires application consumer)
+What it does: Uses a non-destructive “queue browser” to peek the oldest message and read a timestamp (e.g., JMS timestamp or custom publish time).
+How it works:
+A lightweight consumer connects to the queue and browses the first message without consuming it.
+Reads the timestamp, calculates now – timestamp.
+Publishes the result as a Prometheus metric.
