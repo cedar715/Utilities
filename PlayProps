@@ -1,5 +1,84 @@
-curl -s -u admin:password \
-  "http://BROKER:8080/SEMP/v2/monitor/msgVpns/YOUR_VPN_NAME/queues/YOUR_QUEUE_NAME/msgs?count=1&select=spooledTime" \
-| jq -r '.data[0].spooledTime' \
-| xargs -I{} date -d {} +%s \
-| awk -v now="$(date +%s)" '{print now - $1 "s"}'
+response 1: 
+<rpc-reply semp-version="soltr/10_11_1VMR">
+  <rpc>
+    <show>
+      <queue>
+        <queues>
+          <queue>
+            <name>my-queue</name>
+            <message-vpn>my-vpn</message-vpn>
+            <spooled-messages>
+              <spooled-message>
+                <message-id>5899540645</message-id>
+                <message-sent>yes</message-sent>
+              </spooled-message>
+              <count>7</count>
+            </spooled-messages>
+            <info>
+              <partition-count>0</partition-count>
+            </info>
+          </queue>
+        </queues>
+      </queue>
+    </show>
+  </rpc>
+<more-cookie>
+<rpc semp-version="soltr/10_11_1VMR">
+  <show>
+    <queue>
+      <name>my-queue</name>
+      <vpn-name>my-vpn</vpn-name>
+      <messages/>
+      <oldest/>
+      <msg-id>5899540647</msg-id>
+      <count/>
+      <num-elements>1</num-elements>
+    </queue>
+  </show>
+</rpc>
+</more-cookie>
+<execute-result code="ok"/>
+</rpc-reply>
+
+
+response 2:
+<rpc-reply semp-version="soltr/10_11_1VMR">
+  <rpc>
+    <show>
+      <queue>
+        <queues>
+          <queue>
+            <name>my-queue</name>
+            <message-vpn>my-vpn</message-vpn>
+            <spooled-messages>
+              <spooled-message>
+                <message-id>5899541371</message-id>
+                <message-sent>yes</message-sent>
+              </spooled-message>
+              <count>7</count>
+            </spooled-messages>
+            <info>
+              <partition-count>0</partition-count>
+            </info>
+          </queue>
+        </queues>
+      </queue>
+    </show>
+  </rpc>
+<more-cookie>
+<rpc semp-version="soltr/10_11_1VMR">
+  <show>
+    <queue>
+      <name>my-queue</name>
+      <vpn-name>my-vpn</vpn-name>
+      <messages/>
+      <oldest/>
+      <msg-id>5899541377</msg-id>
+      <count/>
+      <num-elements>1</num-elements>
+    </queue>
+  </show>
+</rpc>
+</more-cookie>
+<execute-result code="ok"/>
+</rpc-reply>
