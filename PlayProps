@@ -1,4 +1,4 @@
-package com.yourorg.solace.exporter.headage;
+package com.yourorg.solace.exporter.v2age;
 
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -6,192 +6,119 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.w3c.dom.Document;
 
 import javax.annotation.PostConstruct;
-import javax.xml.parsers.DocumentBuilderFactory;
-import javax.xml.xpath.XPath;
-import javax.xml.xpath.XPathConstants;
-import javax.xml.xpath.XPathFactory;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
+import java.net.http.*;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.*;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.Base64;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Configuration
-@ConfigurationProperties(prefix = "solace")
-class SolaceHeadAgeProps {
-  private Duration pollInterval = Duration.ofSeconds(30);
+@ConfigurationProperties(prefix = "solace.v2age")
+class V2AgeProps {
+  /** Enable/disable this feature per env. */
+  private boolean enabled = true;
+  /** Poll interval should be modest (e.g., 60s–300s). */
+  private Duration pollInterval = Duration.ofSeconds(120);
   private Duration timeout = Duration.ofSeconds(5);
   private List<Router> routers = List.of();
-
   public static class Router {
     private String name, url, username, password;
     private List<QueueRef> queues = List.of();
-    // getters/setters
-    public String getName() { return name; }
-    public void setName(String name) { this.name = name; }
-    public String getUrl() { return url; }
-    public void setUrl(String url) { this.url = url; }
-    public String getUsername() { return username; }
-    public void setUsername(String username) { this.username = username; }
-    public String getPassword() { return password; }
-    public void setPassword(String password) { this.password = password; }
-    public List<QueueRef> getQueues() { return queues; }
-    public void setQueues(List<QueueRef> queues) { this.queues = queues; }
+    // getters/setters…
+    public String getName() { return name; } public void setName(String n){name=n;}
+    public String getUrl() { return url; } public void setUrl(String u){url=u;}
+    public String getUsername(){return username;} public void setUsername(String u){username=u;}
+    public String getPassword(){return password;} public void setPassword(String p){password=p;}
+    public List<QueueRef> getQueues(){return queues;} public void setQueues(List<QueueRef> q){queues=q;}
   }
-  public static class QueueRef {
-    private String vpn, name;
-    public String getVpn() { return vpn; }
-    public void setVpn(String vpn) { this.vpn = vpn; }
-    public String getName() { return name; }
-    public void setName(String name) { this.name = name; }
+  public static class QueueRef { private String vpn,name;
+    public String getVpn(){return vpn;} public void setVpn(String v){vpn=v;}
+    public String getName(){return name;} public void setName(String n){name=n;}
   }
-
-  // getters/setters
-  public Duration getPollInterval() { return pollInterval; }
-  public void setPollInterval(Duration pollInterval) { this.pollInterval = pollInterval; }
-  public Duration getTimeout() { return timeout; }
-  public void setTimeout(Duration timeout) { this.timeout = timeout; }
-  public List<Router> getRouters() { return routers; }
-  public void setRouters(List<Router> routers) { this.routers = routers; }
+  public boolean isEnabled(){return enabled;} public void setEnabled(boolean e){enabled=e;}
+  public Duration getPollInterval(){return pollInterval;} public void setPollInterval(Duration d){pollInterval=d;}
+  public Duration getTimeout(){return timeout;} public void setTimeout(Duration t){timeout=t;}
+  public List<Router> getRouters(){return routers;} public void setRouters(List<Router> r){routers=r;}
 }
 
 @Component
-class SolaceHeadAgeCollector {
-
-  private final SolaceHeadAgeProps props;
+class V2OldestAgeExporter {
+  private final V2AgeProps props;
   private final MeterRegistry registry;
   private final HttpClient http;
+  private final Map<Key,State> states = new ConcurrentHashMap<>();
+  record Key(String router,String vpn,String queue){}
+  static final class State { volatile double ageSeconds = 0; }
 
-  private final XPath X = XPathFactory.newInstance().newXPath();
-  private final Map<Key, State> states = new ConcurrentHashMap<>();
-  private volatile boolean gaugesRegistered = false;
-
-  SolaceHeadAgeCollector(SolaceHeadAgeProps props, MeterRegistry registry) {
-    this.props = props;
-    this.registry = registry;
-    this.http = HttpClient.newBuilder()
-        .connectTimeout(props.getTimeout())
-        .build();
-  }
-
-  private record Key(String router, String vpn, String queue) {}
-  private static final class State {
-    volatile long oldestId = 0L;
-    volatile long depth = 0L;
-    volatile long lastChangeEpoch = Instant.now().getEpochSecond();
-    volatile long headUnchangedSeconds = 0L;
+  V2OldestAgeExporter(V2AgeProps props, MeterRegistry registry) {
+    this.props = props; this.registry = registry;
+    this.http = HttpClient.newBuilder().connectTimeout(props.getTimeout()).build();
   }
 
   @PostConstruct
-  void init() {
-    // lazy-per-queue gauges
-    // optional: a global max gauge (remove if you don't want it)
-    Gauge.builder("solace_queue_head_unchanged_seconds_max", states,
-        m -> m.values().stream().mapToDouble(s -> s.headUnchangedSeconds).max().orElse(0.0))
-        .description("Max seconds since oldest message-id last advanced across all tracked queues")
-        .register(registry);
-  }
+  void init() { /* lazy gauge registration per queue in poll() */ }
 
-  private void ensurePerQueueGauges(Key k, State s) {
-    if (gaugesRegistered) return; // cheap fast-path; we still register per key below
-
-    // Register three gauges per-queue when first seen
-    Gauge.builder("solace_queue_head_unchanged_seconds", s, st -> st.headUnchangedSeconds)
-        .description("Seconds since oldest message-id last advanced (SEMP v1 derived)")
-        .tag("router", k.router).tag("vpn", k.vpn).tag("queue", k.queue)
-        .register(registry);
-    Gauge.builder("solace_queue_oldest_message_id", s, st -> st.oldestId)
-        .description("Oldest message internal spool id (SEMP v1)")
-        .tag("router", k.router).tag("vpn", k.vpn).tag("queue", k.queue)
-        .register(registry);
-    Gauge.builder("solace_queue_spooled_count", s, st -> st.depth)
-        .description("Total spooled messages (SEMP v1)")
-        .tag("router", k.router).tag("vpn", k.vpn).tag("queue", k.queue)
-        .register(registry);
-  }
-
-  @Scheduled(fixedDelayString = "#{@solaceHeadAgeProps.pollInterval.toMillis()}")
+  @Scheduled(fixedDelayString = "#{@v2AgeProps.pollInterval.toMillis()}")
   void poll() {
-    final long now = Instant.now().getEpochSecond();
-
-    for (var r : props.getRouters()) {
-      for (var q : r.getQueues()) {
-        final Key key = new Key(r.getName(), q.getVpn(), q.getName());
-        final State st = states.computeIfAbsent(key, k -> {
+    if (!props.isEnabled()) return;
+    long nowEpoch = Instant.now().getEpochSecond();
+    for (var r: props.getRouters()) {
+      for (var q: r.getQueues()) {
+        Key key = new Key(r.getName(), q.getVpn(), q.getName());
+        State st = states.computeIfAbsent(key, k -> {
           State s = new State();
-          ensurePerQueueGauges(k, s);
+          Gauge.builder("solace_queue_oldest_message_age_seconds", s, v -> v.ageSeconds)
+              .description("Exact age of oldest queued message from SEMP v2 spooledTime")
+              .tag("router", k.router()).tag("vpn", k.vpn()).tag("queue", k.queue())
+              .register(registry);
           return s;
         });
 
         try {
-          Document doc = postSempXml(r.getUrl(), r.getUsername(), r.getPassword(),
-              "<rpc><show><queue>"
-                  + "<name>"+escape(q.getName())+"</name>"
-                  + "<vpn-name>"+escape(q.getVpn())+"</vpn-name>"
-                  + "<messages/><oldest/><count/><num-elements>1</num-elements>"
-                  + "</queue></show></rpc>");
+          String url = String.format(
+              "%s/SEMP/v2/monitor/msgVpns/%s/queues/%s/msgs?count=1&select=messageId,spooledTime",
+              r.getUrl().replaceAll("/+$",""), // tolerate trailing slash
+              encode(q.getVpn()), encode(q.getName()));
+          HttpRequest req = HttpRequest.newBuilder(URI.create(url))
+              .timeout(props.getTimeout())
+              .header("Authorization","Basic " + basic(r.getUsername(), r.getPassword()))
+              .GET().build();
+          HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+          if (resp.statusCode()/100 != 2) throw new RuntimeException("SEMP v2 HTTP "+resp.statusCode()+" body="+resp.body());
 
-          long depth = parseLong(eval(doc, "string(//spooled-messages/count)"));
-          long oldest = parseLong(eval(doc, "string(//spooled-messages/spooled-message[1]/message-id)"));
+          // Expect: {"data":[{"messageId": "...","spooledTime":"2025-08-11T09:15:30Z"}], "meta":{...}}
+          String json = resp.body();
+          String spooledTime = extract(json, "\"spooledTime\":\"", "\""); // micro parser for 2 fields
+          String countStr   = extract(json, "\"count\":", ","); // optional:  verify data length if desired
 
-          st.depth = depth;
-
-          if (depth == 0 || oldest == 0) {
-            // empty queue (or not present) → reset
-            st.oldestId = 0;
-            st.lastChangeEpoch = now;
-            st.headUnchangedSeconds = 0;
-          } else if (st.oldestId == 0 || oldest != st.oldestId) {
-            // head advanced → reset timer
-            st.oldestId = oldest;
-            st.lastChangeEpoch = now;
-            st.headUnchangedSeconds = 0;
-          } else {
-            // unchanged → increment age
-            st.headUnchangedSeconds = Math.max(0, now - st.lastChangeEpoch);
+          if (spooledTime == null || spooledTime.isBlank()) {
+            st.ageSeconds = 0; // queue empty, or no messages
+            continue;
           }
+          // Parse RFC3339 to epoch
+          long spooledEpoch = OffsetDateTime.parse(spooledTime, DateTimeFormatter.ISO_OFFSET_DATE_TIME).toInstant().getEpochSecond();
+          st.ageSeconds = Math.max(0, nowEpoch - spooledEpoch);
         } catch (Exception e) {
-          // Keep last values; optionally record a scrape failure counter/log here
+          // Keep last value; consider adding a scrape_error counter
         }
       }
     }
-    gaugesRegistered = true;
   }
 
-  // --- helpers ---
-  private Document postSempXml(String url, String user, String pass, String xml) throws Exception {
-    String basic = Base64.getEncoder().encodeToString((user + ":" + pass).getBytes(StandardCharsets.UTF_8));
-    HttpRequest req = HttpRequest.newBuilder(URI.create(url))
-        .timeout(props.getTimeout())
-        .header("Content-Type", "application/xml")
-        .header("Authorization", "Basic " + basic)
-        .POST(HttpRequest.BodyPublishers.ofString(xml, StandardCharsets.UTF_8))
-        .build();
-    HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
-    if (resp.statusCode() / 100 != 2) {
-      throw new RuntimeException("SEMP v1 HTTP " + resp.statusCode() + " body=" + resp.body());
-    }
-    var f = DocumentBuilderFactory.newInstance();
-    f.setNamespaceAware(false);
-    return f.newDocumentBuilder().parse(new java.io.ByteArrayInputStream(resp.body().getBytes(StandardCharsets.UTF_8)));
+  private static String basic(String u, String p){
+    return Base64.getEncoder().encodeToString((u+":"+p).getBytes(StandardCharsets.UTF_8));
   }
-
-  private String eval(Document doc, String expr) throws Exception {
-    return (String) X.evaluate(expr, doc, XPathConstants.STRING);
-  }
-
-  private static long parseLong(String s) {
-    try { return Long.parseLong(s.trim()); } catch (Exception e) { return 0L; }
-  }
-
-  private static String escape(String s) {
-    return s.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;");
+  private static String encode(String s){ return java.net.URLEncoder.encode(s, StandardCharsets.UTF_8); }
+  private static String extract(String src, String start, String end){
+    int i = src.indexOf(start); if (i<0) return null; i += start.length();
+    int j = src.indexOf(end, i); if (j<0) return null; return src.substring(i,j);
   }
 }
