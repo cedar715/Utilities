@@ -1,9 +1,5 @@
-curl -u admin:password \
-  -H 'Content-Type: application/xml' \
-  -d '<rpc><show><queue>
-        <name>YOUR_QUEUE_NAME</name>
-        <vpn-name>YOUR_VPN_NAME</vpn-name>
-        <messages><oldest/><count>1</count></messages>
-        <detail/>
-      </queue></show></rpc>' \
-  http://BROKER:8080/SEMP
+curl -s -u admin:password \
+  "http://BROKER:8080/SEMP/v2/monitor/msgVpns/YOUR_VPN_NAME/queues/YOUR_QUEUE_NAME/msgs?count=1&select=spooledTime" \
+| jq -r '.data[0].spooledTime' \
+| xargs -I{} date -d {} +%s \
+| awk -v now="$(date +%s)" '{print now - $1 "s"}'
