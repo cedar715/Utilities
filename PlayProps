@@ -1,23 +1,9 @@
-import requests
-import xml.etree.ElementTree as ET
-
-# 1) POST the request
-r = requests.post(
-    "http://BROKER:8080/SEMP",
-    auth=("admin","password"),
-    data=open("request.xml","rb")
-)
-r.raise_for_status()
-
-# 2) Parse XML
-root = ET.fromstring(r.content)
-
-# 3) Extract values
-last = int(root.findtext(".//last-message-id-spooled"))
-high = int(root.findtext(".//high-message-id-ack-received"))
-age = int(root.findtext(".//oldest-msg-age"))
-
-depth = last - high
-
-print(f"Messages in queue: {depth}")
-print(f"Oldest message age: {age} seconds")
+curl -u admin:password \
+  -H 'Content-Type: application/xml' \
+  -d '<rpc><show><queue>
+        <name>YOUR_QUEUE_NAME</name>
+        <vpn-name>YOUR_VPN_NAME</vpn-name>
+        <messages><oldest/><count>1</count></messages>
+        <detail/>
+      </queue></show></rpc>' \
+  http://BROKER:8080/SEMP
