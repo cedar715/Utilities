@@ -1,124 +1,33 @@
-package com.yourorg.solace.exporter.v2age;
+his approach is not giving you the true absolute age from when the message was originally published.
+It’s giving you a lower-bound age based on how long the same oldest message ID has remained at the head of the queue while there are still messages in it.
 
-import io.micrometer.core.instrument.Gauge;
-import io.micrometer.core.instrument.MeterRegistry;
-import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.stereotype.Component;
-
-import javax.annotation.PostConstruct;
-import java.net.URI;
-import java.net.http.*;
-import java.nio.charset.StandardCharsets;
-import java.time.Duration;
-import java.time.Instant;
-import java.time.OffsetDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.Base64;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-
-@Configuration
-@ConfigurationProperties(prefix = "solace.v2age")
-class V2AgeProps {
-  /** Enable/disable this feature per env. */
-  private boolean enabled = true;
-  /** Poll interval should be modest (e.g., 60s–300s). */
-  private Duration pollInterval = Duration.ofSeconds(120);
-  private Duration timeout = Duration.ofSeconds(5);
-  private List<Router> routers = List.of();
-  public static class Router {
-    private String name, url, username, password;
-    private List<QueueRef> queues = List.of();
-    // getters/setters…
-    public String getName() { return name; } public void setName(String n){name=n;}
-    public String getUrl() { return url; } public void setUrl(String u){url=u;}
-    public String getUsername(){return username;} public void setUsername(String u){username=u;}
-    public String getPassword(){return password;} public void setPassword(String p){password=p;}
-    public List<QueueRef> getQueues(){return queues;} public void setQueues(List<QueueRef> q){queues=q;}
-  }
-  public static class QueueRef { private String vpn,name;
-    public String getVpn(){return vpn;} public void setVpn(String v){vpn=v;}
-    public String getName(){return name;} public void setName(String n){name=n;}
-  }
-  public boolean isEnabled(){return enabled;} public void setEnabled(boolean e){enabled=e;}
-  public Duration getPollInterval(){return pollInterval;} public void setPollInterval(Duration d){pollInterval=d;}
-  public Duration getTimeout(){return timeout;} public void setTimeout(Duration t){timeout=t;}
-  public List<Router> getRouters(){return routers;} public void setRouters(List<Router> r){routers=r;}
-}
-
-@Component
-class V2OldestAgeExporter {
-  private final V2AgeProps props;
-  private final MeterRegistry registry;
-  private final HttpClient http;
-  private final Map<Key,State> states = new ConcurrentHashMap<>();
-  record Key(String router,String vpn,String queue){}
-  static final class State { volatile double ageSeconds = 0; }
-
-  V2OldestAgeExporter(V2AgeProps props, MeterRegistry registry) {
-    this.props = props; this.registry = registry;
-    this.http = HttpClient.newBuilder().connectTimeout(props.getTimeout()).build();
-  }
-
-  @PostConstruct
-  void init() { /* lazy gauge registration per queue in poll() */ }
-
-  @Scheduled(fixedDelayString = "#{@v2AgeProps.pollInterval.toMillis()}")
-  void poll() {
-    if (!props.isEnabled()) return;
-    long nowEpoch = Instant.now().getEpochSecond();
-    for (var r: props.getRouters()) {
-      for (var q: r.getQueues()) {
-        Key key = new Key(r.getName(), q.getVpn(), q.getName());
-        State st = states.computeIfAbsent(key, k -> {
-          State s = new State();
-          Gauge.builder("solace_queue_oldest_message_age_seconds", s, v -> v.ageSeconds)
-              .description("Exact age of oldest queued message from SEMP v2 spooledTime")
-              .tag("router", k.router()).tag("vpn", k.vpn()).tag("queue", k.queue())
-              .register(registry);
-          return s;
-        });
-
-        try {
-          String url = String.format(
-              "%s/SEMP/v2/monitor/msgVpns/%s/queues/%s/msgs?count=1&select=messageId,spooledTime",
-              r.getUrl().replaceAll("/+$",""), // tolerate trailing slash
-              encode(q.getVpn()), encode(q.getName()));
-          HttpRequest req = HttpRequest.newBuilder(URI.create(url))
-              .timeout(props.getTimeout())
-              .header("Authorization","Basic " + basic(r.getUsername(), r.getPassword()))
-              .GET().build();
-          HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
-          if (resp.statusCode()/100 != 2) throw new RuntimeException("SEMP v2 HTTP "+resp.statusCode()+" body="+resp.body());
-
-          // Expect: {"data":[{"messageId": "...","spooledTime":"2025-08-11T09:15:30Z"}], "meta":{...}}
-          String json = resp.body();
-          String spooledTime = extract(json, "\"spooledTime\":\"", "\""); // micro parser for 2 fields
-          String countStr   = extract(json, "\"count\":", ","); // optional:  verify data length if desired
-
-          if (spooledTime == null || spooledTime.isBlank()) {
-            st.ageSeconds = 0; // queue empty, or no messages
-            continue;
-          }
-          // Parse RFC3339 to epoch
-          long spooledEpoch = OffsetDateTime.parse(spooledTime, DateTimeFormatter.ISO_OFFSET_DATE_TIME).toInstant().getEpochSecond();
-          st.ageSeconds = Math.max(0, nowEpoch - spooledEpoch);
-        } catch (Exception e) {
-          // Keep last value; consider adding a scrape_error counter
-        }
-      }
-    }
-  }
-
-  private static String basic(String u, String p){
-    return Base64.getEncoder().encodeToString((u+":"+p).getBytes(StandardCharsets.UTF_8));
-  }
-  private static String encode(String s){ return java.net.URLEncoder.encode(s, StandardCharsets.UTF_8); }
-  private static String extract(String src, String start, String end){
-    int i = src.indexOf(start); if (i<0) return null; i += start.length();
-    int j = src.indexOf(end, i); if (j<0) return null; return src.substring(i,j);
-  }
-}
+How it works step-by-step
+First time the logic runs
+Your exporter polls SEMP v1 and asks for:
+<messages/><oldest/><count/><num-elements>1</num-elements>
+You get back the oldest message’s message-id and the queue depth.
+Since you’ve never seen this message-id before, the exporter:
+Stores it in memory.
+Stores “now” as the lastChangeEpoch.
+Sets headUnchangedSeconds = 0.
+Subsequent polls
+Every poll, it asks again for oldest message-id and depth.
+If the oldest ID is different from last time:
+That means a message was consumed (or purged) from the head.
+The head changed → reset timer to 0 and store new message-id.
+If the oldest ID is the same:
+That means the same message is still stuck at the head.
+Increment the headUnchangedSeconds counter as now - lastChangeEpoch.
+What you get in Prometheus
+headUnchangedSeconds will keep growing as long as the head stays the same.
+When the head changes, it resets to zero.
+If the queue is empty (count == 0), the metric also resets to zero.
+Important limitations
+First run is the “clock start”
+If a message has been sitting there for hours before you deploy this logic, your counter will still start at 0 on first observation.
+You lose all “history” prior to your exporter watching it.
+Why it’s still useful
+Even though you can’t get the true original publish time in v1, this lower-bound age is still extremely useful for detecting:
+Stuck consumers.
+Backlogs that aren’t draining.
+Queues where the oldest message has been “rotting” for too long.
