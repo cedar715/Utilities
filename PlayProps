@@ -1,33 +1,186 @@
-his approach is not giving you the true absolute age from when the message was originally published.
-It’s giving you a lower-bound age based on how long the same oldest message ID has remained at the head of the queue while there are still messages in it.
+import groovy.lang.GroovyObject
+import org.jfrog.gradle.plugin.artifactory.dsl.PublisherConfig
+import org.openapitools.generator.gradle.plugin.tasks.GenerateTask
 
-How it works step-by-step
-First time the logic runs
-Your exporter polls SEMP v1 and asks for:
-<messages/><oldest/><count/><num-elements>1</num-elements>
-You get back the oldest message’s message-id and the queue depth.
-Since you’ve never seen this message-id before, the exporter:
-Stores it in memory.
-Stores “now” as the lastChangeEpoch.
-Sets headUnchangedSeconds = 0.
-Subsequent polls
-Every poll, it asks again for oldest message-id and depth.
-If the oldest ID is different from last time:
-That means a message was consumed (or purged) from the head.
-The head changed → reset timer to 0 and store new message-id.
-If the oldest ID is the same:
-That means the same message is still stuck at the head.
-Increment the headUnchangedSeconds counter as now - lastChangeEpoch.
-What you get in Prometheus
-headUnchangedSeconds will keep growing as long as the head stays the same.
-When the head changes, it resets to zero.
-If the queue is empty (count == 0), the metric also resets to zero.
-Important limitations
-First run is the “clock start”
-If a message has been sitting there for hours before you deploy this logic, your counter will still start at 0 on first observation.
-You lose all “history” prior to your exporter watching it.
-Why it’s still useful
-Even though you can’t get the true original publish time in v1, this lower-bound age is still extremely useful for detecting:
-Stuck consumers.
-Backlogs that aren’t draining.
-Queues where the oldest message has been “rotting” for too long.
+plugins {
+    // keep if you use it internally; otherwise remove
+    id("51080-cicd-gradle-build-plugin") version "4.0.+"
+
+    id("org.openapi.generator") version "7.8.0"
+    id("java")
+    id("java-library")
+    id("maven-publish")
+    id("com.jfrog.artifactory") version "4.33.1"
+    id("io.spring.dependency-management") version "1.1.6"
+}
+
+group = "com.solace"
+version = "4.2.0"
+
+extra["jackson_version"] = "2.17.2"
+extra["javax_annotation_version"] = "1.3.2"
+extra["spring_cloud_version"] = "2023.0.3"
+extra["swagger_annotations_version"] = "2.2.23"
+extra["validation_api_version"] = "2.0.1.Final"
+
+java {
+    toolchain {
+        languageVersion.set(JavaLanguageVersion.of(17))
+    }
+}
+
+repositories {
+    mavenCentral()
+    // add your internal mirrors if needed
+}
+
+dependencyManagement {
+    imports {
+        mavenBom("org.springframework.cloud:spring-cloud-dependencies:${property("spring_cloud_version")}")
+    }
+}
+
+dependencies {
+    // Runtime / compile deps your generated code typically needs
+    api("org.springframework.boot:spring-boot-starter")
+    api("org.springframework.cloud:spring-cloud-starter-openfeign")
+
+    api("org.openapitools:jackson-databind-nullable:0.2.6")
+
+    api("javax.annotation:javax.annotation-api:${property("javax_annotation_version")}")
+    api("io.swagger.core.v3:swagger-annotations:${property("swagger_annotations_version")}")
+
+    api("com.fasterxml.jackson.core:jackson-core:${property("jackson_version")}")
+    api("com.fasterxml.jackson.core:jackson-databind:${property("jackson_version")}")
+    api("com.fasterxml.jackson.datatype:jackson-datatype-jsr310:${property("jackson_version")}")
+
+    api("javax.validation:validation-api:${property("validation_api_version")}")
+
+    testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
+}
+
+/**
+ * ---------- OpenAPI generation for multiple specs (no merging) ----------
+ * Each spec gets its own task, output directory, and packages.
+ */
+val genRoot = layout.buildDirectory.dir("generated/openapi")
+
+val genSpecA by tasks.registering(GenerateTask::class) {
+    generatorName.set("spring")
+    library.set("spring-cloud")
+
+    // TODO: point to your first spec file
+    inputSpec.set("$projectDir/specs/spec-a.yaml")
+
+    outputDir.set(genRoot.get().dir("specA").asFile.absolutePath)
+
+    apiPackage.set("com.solace.speca.api")
+    modelPackage.set("com.solace.speca.model")
+    invokerPackage.set("com.solace.speca.invoker")
+
+    additionalProperties.set(
+        mapOf(
+            "dateLibrary" to "java8",
+            "interfaceOnly" to "true",
+            // optional, can help avoid tag name collisions
+            //"apiNameSuffix" to "A"
+        )
+    )
+
+    // generate only apis/models/supporting (tune as desired)
+    globalProperties.set(mapOf("models" to "", "apis" to "", "supportingFiles" to ""))
+}
+
+val genSpecB by tasks.registering(GenerateTask::class) {
+    generatorName.set("spring")
+    library.set("spring-cloud")
+
+    // TODO: point to your second spec file
+    inputSpec.set("$projectDir/specs/spec-b.yaml")
+
+    outputDir.set(genRoot.get().dir("specB").asFile.absolutePath)
+
+    apiPackage.set("com.solace.specb.api")
+    modelPackage.set("com.solace.specb.model")
+    invokerPackage.set("com.solace.specb.invoker")
+
+    additionalProperties.set(
+        mapOf(
+            "dateLibrary" to "java8",
+            "interfaceOnly" to "true"
+            //"apiNameSuffix" to "B"
+        )
+    )
+
+    globalProperties.set(mapOf("models" to "", "apis" to "", "supportingFiles" to ""))
+}
+
+tasks.register("openApiGenerateAll") {
+    dependsOn(genSpecA, genSpecB)
+}
+
+/**
+ * Add generated sources to the main source set so they get compiled and packaged.
+ * OpenAPI writes Java under {outputDir}/src/main/java by default.
+ */
+sourceSets {
+    named("main") {
+        java {
+            srcDir(genRoot.get().dir("specA/src/main/java"))
+            srcDir(genRoot.get().dir("specB/src/main/java"))
+        }
+        resources {
+            srcDir(genRoot.get().dir("specA/src/main/resources"))
+            srcDir(genRoot.get().dir("specB/src/main/resources"))
+        }
+    }
+}
+
+/**
+ * Make compilation and packaging depend on generation.
+ */
+tasks.named("compileJava") {
+    dependsOn(genSpecA, genSpecB)
+}
+tasks.named("jar") {
+    dependsOn(genSpecA, genSpecB)
+}
+
+/**
+ * Publishing (kept close to your screenshots)
+ */
+publishing {
+    publications {
+        register<MavenPublication>("mavenJava") {
+            from(components["java"])
+        }
+    }
+}
+
+/**
+ * Artifactory publication (JFrog Kotlin DSL via Groovy interop)
+ * Remove if you don't use Artifactory.
+ */
+artifactory {
+    publish(delegateClosureOf<PublisherConfig> {
+        defaults(delegateClosureOf<GroovyObject> {
+            invokeMethod("publications", "mavenJava")
+        })
+    })
+}
+
+/**
+ * Test + packaging tweaks
+ */
+tasks.withType<Test> {
+    useJUnitPlatform()
+}
+
+// If this module is a pure library (no boot app)
+tasks.named("bootJar").configure {
+    enabled = false
+}
+
+tasks.named<Jar>("jar") {
+    archiveClassifier.set("")
+}
