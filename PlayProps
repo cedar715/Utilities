@@ -1,9 +1,1 @@
-GET _cat/indices/solace-logs-2025.08.28?h=index,store.size,docs.count
-GET _cat/indices/solace-logs*?h=index,store.size,docs.count&s=index
-GET _data_stream/solace-logs*/_stats
-GET _cat/indices/.ds-solace-logs*?h=index,store.size,docs.count&s=index
-DAY=$(date -u -d 'TZ="Asia/Kolkata" 1 day ago' +%Y.%m.%d)
-
-curl -s "$ES/solace-logs-$DAY/_stats?filter_path=indices.*.primaries.store.size_in_bytes" \
-| jq '[..|.size_in_bytes? | numbers] | add // 0' \
-| awk '{printf "Solace logs (yesterday): %.2f GB\n", $1/1000000000}'
+GET _cat/indices/solace-logs*?h=index,store.size,docs.count,creation.date,creation.date.string&s=creation.date
