@@ -1,48 +1,17 @@
-Here’s a clean way to estimate for **5 kits** vs **10 kits**, using the ingestion rates we already derived:
+# Where Prometheus writes TSDB data (adjust if different)
+DATA_DIR=/var/lib/prometheus
 
----
+# A. Point-in-time size (what Elastic will ask first)
+du -sh ${DATA_DIR}
 
-## Baseline (from your 23-instance data)
+# B. Separate WAL vs long-term blocks (useful context)
+du -sh ${DATA_DIR}/wal            # write-ahead log (spiky, recent hours)
+du -sh ${DATA_DIR}/* | grep -E '/[0-9]{13}-[0-9]{13}'  # per-block dirs
 
-* **Per kit (4 instances):**
-
-  * \~**21 GB/day average**
-  * \~**31 GB/day peak**
-  * Monthly (30 days): **\~630 GB to \~930 GB**
-
----
-
-## For 5 kits (20 instances)
-
-* **Daily ingestion:**
-
-  * Average: $5 × 21$ ≈ **105 GB/day**
-  * Peak: $5 × 31$ ≈ **155 GB/day**
-* **Monthly ingestion:**
-
-  * Average: **\~3.2 TB/month**
-  * Peak: **\~4.6 TB/month**
-
----
-
-## For 10 kits (40 instances)
-
-* **Daily ingestion:**
-
-  * Average: $10 × 21$ ≈ **210 GB/day**
-  * Peak: $10 × 31$ ≈ **310 GB/day**
-* **Monthly ingestion:**
-
-  * Average: **\~6.3 TB/month**
-  * Peak: **\~9.3 TB/month**
-
----
-
-✅ **Summary:**
-
-* **5 kits** → \~105 GB/day (3.2–4.6 TB/month)
-* **10 kits** → \~210 GB/day (6.3–9.3 TB/month)
-
----
-
-Do you want me to also **add the 3 appliances** into these scenarios, or should the estimates be strictly “kits only”?
+# C. Daily growth (7-day average)
+# Take two snapshots 7 days apart or, if you have daily backups/snapshots, diff them:
+SNAP1=$(du -sb ${DATA_DIR} | awk '{print $1}')   # bytes now
+# ... run again in 7 days:
+SNAP2=$(du -sb ${DATA_DIR} | awk '{print $1}')
+AVG_GB_PER_DAY=$(awk -v a="$SNAP1" -v b="$SNAP2" 'BEGIN{d=(b-a)/7/1000000000; printf "%.2f\n", d}')
+echo "Prometheus TSDB growth: ~${AVG_GB_PER_DAY} GB/day (7-day avg)"
