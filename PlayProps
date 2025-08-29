@@ -1,17 +1,25 @@
-# Where Prometheus writes TSDB data (adjust if different)
-DATA_DIR=/var/lib/prometheus
-
-# A. Point-in-time size (what Elastic will ask first)
-du -sh ${DATA_DIR}
-
-# B. Separate WAL vs long-term blocks (useful context)
-du -sh ${DATA_DIR}/wal            # write-ahead log (spiky, recent hours)
-du -sh ${DATA_DIR}/* | grep -E '/[0-9]{13}-[0-9]{13}'  # per-block dirs
-
-# C. Daily growth (7-day average)
-# Take two snapshots 7 days apart or, if you have daily backups/snapshots, diff them:
-SNAP1=$(du -sb ${DATA_DIR} | awk '{print $1}')   # bytes now
-# ... run again in 7 days:
-SNAP2=$(du -sb ${DATA_DIR} | awk '{print $1}')
-AVG_GB_PER_DAY=$(awk -v a="$SNAP1" -v b="$SNAP2" 'BEGIN{d=(b-a)/7/1000000000; printf "%.2f\n", d}')
-echo "Prometheus TSDB growth: ~${AVG_GB_PER_DAY} GB/day (7-day avg)"
+----
+TSDB Head Status
+Name	Count
+Number of Series	3824350
+Number of Chunks	7705252
+Number of Label Pairs	58607
+Current Min Time	2025-08-29T02:00:00Z
+Current Max Time	2025-08-29T04:59:20Z
+---
+/prometheus $ du -sh ${DATA_DIR}/*
+3.5G    /prometheus/01K2PPMHDQMWXMX1ZAF0AQGAY1
+6.9G    /prometheus/01K2WG0E26HFM7SQCND64M5HP1
+8.6G    /prometheus/01K329D51EEX06JC5VJGNHGP2S
+14.2G   /prometheus/01K38323TGA1FJSTRFE0S2FBHF
+16.9G   /prometheus/01K3DW6EPAHWVQNXB6B0EPNG6X
+17.8G   /prometheus/01K3KNPFHPH72145QX90M8JXTN
+8.5G    /prometheus/01K3SEZDD4C9YKHGHW4995PYMR
+621.6M  /prometheus/01K3SWB6XN5TKDCYNKRK3FK98M
+620.0M  /prometheus/01K3T36TKQEJ4395R9VDE054BV
+989.5M  /prometheus/01K3T39EJK3R4MQQ64T6TBQ01P
+128.1M  /prometheus/chunks_head
+0       /prometheus/lock
+20.0K   /prometheus/queries.active
+912.0M  /prometheus/wal
+---
