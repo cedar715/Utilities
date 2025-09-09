@@ -1,1 +1,7 @@
-(sum by (vpn, host) (increase(sol_event_vpn_bridging_link_rejected_total[1h])) > 0 or (sum by (vpn, host) (sol_event_vpn_bridging_link_rejected_total) unless sum by (vpn, host) (sol_event_vpn_bridging_link_rejected_total offset 1h) or vector(0))) > 0
+(
+  sum by (vpn, host) (increase(sol_event_vpn_bridging_link_rejected_total[5m]))
+)
+or on (vpn, host)
+(
+  0 * sum by (vpn, host) (present_over_time(sol_event_vpn_bridging_link_rejected_total[15m]))
+)
