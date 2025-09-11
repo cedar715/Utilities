@@ -1,6 +1,7 @@
--- use a window long enough that a real outage won’t exceed it
-solace_ha_node_left_unmatched{group,node} =
-  clamp_min(
-    sum by (group, node) (increase(sol_event_ha_node_left_total[30d])) -
-    sum by (group, node) (increase(sol_event_ha_node_joined_total[30d])),
-  0)
+clamp_min(
+  sum by (host) (increase(sol_event_system_ha_redun_group_node_left_total[30d])) -
+  (
+    sum by (host) (increase(sol_event_system_ha_redun_group_node_joined_total[30d]))
+    or on(host) 0 * sum by (host) (increase(sol_event_system_ha_redun_group_node_left_total[30d]))
+  ),
+0)
