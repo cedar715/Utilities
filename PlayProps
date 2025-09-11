@@ -1,10 +1,30 @@
-Pairs → use one alert per pair:
-SYSTEM_HA_REDUN_GROUP_NODE_LEFT ↔ SYSTEM_HA_REDUN_GROUP_NODE_JOINED
-SYSTEM_HA_REDUN_STATE_DOWN ↔ SYSTEM_HA_REDUN_STATE_UP (you’ve seen UP in logs)
-SYSTEM_CFGSYNC_DOWN ↔ SYSTEM_CFGSYNC_UP
-SYSTEM_LINK_ADB_HELLO_PROTOCOL_DOWN ↔ SYSTEM_LINK_ADB_HELLO_PROTOCOL_UP
-SYSTEM_LINK_ADB_LINK_DOWN ↔ SYSTEM_LINK_ADB_LINK_UP
-SYSTEM_LINK_ETH_LINK_DOWN ↔ SYSTEM_LINK_ETH_LINK_UP
-VPN_BRIDGING_LINK_DOWN ↔ VPN_BRIDGING_LINK_UP
-SYSTEM_SERVICE_LISTEN_PORT_DISABLE ↔ SYSTEM_SERVICE_LISTEN_PORT_ENABLE (name can be ENABLE / ENABLED — confirm in your logs)
-SYSTEM_SYSTEM_SHUTDOWN_INITIATED ↔ SYSTEM_SYSTEM_STARTUP_COMPLETE (lifecycle pair; usually gate with “expected up”)
+Use the same offset on both sides (LEFT and JOINED) and anywhere else you reference those counters:
+# Query A — unmatched LEFTs since last catch-up (6h window, 2m settle)
+clamp_min(
+  (
+    sum by (host) (increase(sol_event_system_ha_redun_group_node_left_total[6h] offset 2m)) -
+    (
+      sum by (host) (increase(sol_event_system_ha_redun_group_node_joined_total[6h] offset 2m))
+      or on(host) 0 * sum by (host) (increase(sol_event_system_ha_redun_group_node_left_total[6h] offset 2m))
+    )
+  )
+  -
+  min_over_time(
+    (
+      sum by (host) (increase(sol_event_system_ha_redun_group_node_left_total[6h] offset 2m)) -
+      (
+        sum by (host) (increase(sol_event_system_ha_redun_group_node_joined_total[6h] offset 2m))
+        or on(host) 0 * sum by (host) (increase(sol_event_system_ha_redun_group_node_left_total[6h] offset 2m))
+      )
+    )[6h:2m]
+  ),
+0)
+# Query B — “no JOIN seen recently” guard (5m window, same 2m settle)
+(
+  sum by (host) (increase(sol_event_system_ha_redun_group_node_joined_total[5m] offset 2m))
+  or on(host) 0 * sum by (host) (increase(sol_event_system_ha_redun_group_node_left_total[5m] offset 2m))
+) == bool 0
+Condition (Math): ($A > 0) and $B
+Pending period: 10m • Evaluate every: 1m • No data/Error: Keep last state
+Trade-off
+The offset delays detection by up to ~2 minutes, but it eliminates false “unmatched” spikes caused purely by ingestion/scrape timing. Pick an offset a bit larger than your worst-case lag (common: 1–3 minutes).
