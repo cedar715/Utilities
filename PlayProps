@@ -1,7 +1,28 @@
-# Focus on recent activity only (last hour)
+# This query maintains a running difference between left and joined events
+# Alert when the difference is positive (more lefts than joins)
 (
-  increase(sol_event_system_ha_redun_group_node_left_total[1h])
-  -
-  (increase(sol_event_system_ha_redun_group_node_joined_total[1h]) or 
-   on(host) increase(sol_event_system_ha_redun_group_node_left_total[1h]) * 0)
+  clamp_min(
+    (
+      # Total left events
+      sol_event_system_ha_redun_group_node_left_total
+      - 
+      # Total joined events (with null handling)
+      (sol_event_system_ha_redun_group_node_joined_total or 
+       on(host) sol_event_system_ha_redun_group_node_left_total * 0)
+    ),
+    0
+  ) 
+  - 
+  # Subtract the minimum difference seen (baseline)
+  clamp_min(
+    min_over_time(
+      (
+        sol_event_system_ha_redun_group_node_left_total
+        - 
+        (sol_event_system_ha_redun_group_node_joined_total or 
+         on(host) sol_event_system_ha_redun_group_node_left_total * 0)
+      )[1h:]
+    ),
+    0
+  )
 ) > 0
