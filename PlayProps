@@ -1,21 +1,7 @@
-clamp_min(
-  (
-    sum by (host) (increase(sol_event_system_ha_redun_group_node_left_total[30d])) -
-    (
-      sum by (host) (increase(sol_event_system_ha_redun_group_node_joined_total[30d]))
-      or on(host) 0 *
-         sum by (host) (increase(sol_event_system_ha_redun_group_node_left_total[30d]))
-    )
+sum by (host) (increase(sol_event_system_ha_redun_group_node_left_total{host="host1"}[30d]))
+
+
+(
+    sum by (host) (increase(sol_event_system_ha_redun_group_node_joined_total{host="host1"}[30d]))
+    or on(host) 0 * sum by (host) (increase(sol_event_system_ha_redun_group_node_left_total{host="host1"}[30d]))
   )
-  -
-  min_over_time(
-    (
-      sum by (host) (increase(sol_event_system_ha_redun_group_node_left_total[30d])) -
-      (
-        sum by (host) (increase(sol_event_system_ha_redun_group_node_joined_total[30d]))
-        or on(host) 0 *
-           sum by (host) (increase(sol_event_system_ha_redun_group_node_left_total[30d]))
-      )
-    )[30d:1h]
-  ),
-0)
