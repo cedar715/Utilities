@@ -20,11 +20,18 @@ clamp_min(
   ),
 0)
 # Query B — “no JOIN seen recently” guard (5m window, same 2m settle)
+# Query B — “no JOIN seen in last 5m”, but ensure every A-host exists here
 (
   sum by (host) (increase(sol_event_system_ha_redun_group_node_joined_total[5m] offset 2m))
-  or on(host) 0 * sum by (host) (increase(sol_event_system_ha_redun_group_node_left_total[5m] offset 2m))
+  or on(host)
+  0 * sum by (host) (
+    increase(sol_event_system_ha_redun_group_node_left_total[6h] offset 2m) +
+    increase(sol_event_system_ha_redun_group_node_joined_total[6h] offset 2m)
+  )
 ) == bool 0
-Condition (Math): ($A > 0) and $B
+
+Condition (Math): ($A > 0) * ($B > 0) > 0
+
 Pending period: 10m • Evaluate every: 1m • No data/Error: Keep last state
 Trade-off
 The offset delays detection by up to ~2 minutes, but it eliminates false “unmatched” spikes caused purely by ingestion/scrape timing. Pick an offset a bit larger than your worst-case lag (common: 1–3 minutes).
