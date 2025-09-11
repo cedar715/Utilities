@@ -1,7 +1,6 @@
-(
-  sum by (vpn, host) (increase(sol_event_vpn_bridging_link_rejected_total[5m]))
-)
-or on (vpn, host)
-(
-  0 * sum by (vpn, host) (present_over_time(sol_event_vpn_bridging_link_rejected_total[15m]))
-)
+-- use a window long enough that a real outage won’t exceed it
+solace_ha_node_left_unmatched{group,node} =
+  clamp_min(
+    sum by (group, node) (increase(sol_event_ha_node_left_total[30d])) -
+    sum by (group, node) (increase(sol_event_ha_node_joined_total[30d])),
+  0)
