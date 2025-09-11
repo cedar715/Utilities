@@ -1,21 +1,26 @@
-clamp_min(
-  (
-    sum by (host) (increase(sol_event_system_ha_redun_group_node_left_total[30d])) -
-    (
-      sum by (host) (increase(sol_event_system_ha_redun_group_node_joined_total[30d]))
-      or on(host)
-         0 * sum by (host) (increase(sol_event_system_ha_redun_group_node_left_total[30d]))
-    )
-  )
-  -
-  min_over_time(
-    (
-      sum by (host) (increase(sol_event_system_ha_redun_group_node_left_total[30d])) -
-      (
-        sum by (host) (increase(sol_event_system_ha_redun_group_node_joined_total[30d]))
-        or on(host)
-           0 * sum by (host) (increase(sol_event_system_ha_redun_group_node_left_total[30d]))
-      )
-    )[30d:1h]
-  ),
-0)
+SYSTEM_AD_MSG_CACHE_USAGE_HIGH 
+SYSTEM_AD_MAX_MSG_CACHE_USAGE_EXCEEDED 
+SYSTEM_AD_MSG_SPOOL_CHG 
+SYSTEM_AUTHENTICATION_SESSION_OPENED 
+SYSTEM_AUTHENTICATION_SESSION_DENIED 
+SYSTEM_CFGSYNC_DOWN 
+SYSTEM_CHASSIS_AVAILABLE_STORAGE_LOW 
+SYSTEM_CHASSIS_POST_NONCRITICAL_NOTIFICATION 
+SYSTEM_HA_REDUN_GROUP_NODE_JOINED 
+SYSTEM_HA_REDUN_GROUP_NODE_LEFT 
+SYSTEM_HA_REDUN_STATE_DOWN 
+SYSTEM_HA_VR_STATE_STANDBY 
+SYSTEM_LINK_ADB_HELLO_PROTOCOL_DOWN 
+SYSTEM_LINK_ADB_LINK_DOWN 
+SYSTEM_LINK_ETH_LINK_DOWN 
+SYSTEM_NAB_BUFFER_LOAD_FACTOR_HIGH 
+SYSTEM_SERVICE_LISTEN_PORT_DISABLE 
+SYSTEM_SYSTEM_STARTUP_COMPLETE 
+SYSTEM_SYSTEM_SHUTDOWN_INITIATED 
+VPN_BRIDGING_LINK_DOWN 
+VPN_BRIDGING_LINK_REJECTED 
+VPN_CLIENT_USERNAME_CONNECTIONS_HIGH 
+VPN_CLIENT_USERNAME_CONNECTIONS_EXCEEDED 
+VPN_REPLICATION_SERVICE_DEGRADED 
+VPN_VPN_CONNECTIONS_HIGH 
+VPN_VPN_STATE_CHANGE 
