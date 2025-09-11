@@ -1,28 +1,21 @@
-# This query maintains a running difference between left and joined events
-# Alert when the difference is positive (more lefts than joins)
-(
-  clamp_min(
+clamp_min(
+  (
+    sum by (host) (increase(sol_event_system_ha_redun_group_node_left_total[30d])) -
     (
-      # Total left events
-      sol_event_system_ha_redun_group_node_left_total
-      - 
-      # Total joined events (with null handling)
-      (sol_event_system_ha_redun_group_node_joined_total or 
-       on(host) sol_event_system_ha_redun_group_node_left_total * 0)
-    ),
-    0
-  ) 
-  - 
-  # Subtract the minimum difference seen (baseline)
-  clamp_min(
-    min_over_time(
-      (
-        sol_event_system_ha_redun_group_node_left_total
-        - 
-        (sol_event_system_ha_redun_group_node_joined_total or 
-         on(host) sol_event_system_ha_redun_group_node_left_total * 0)
-      )[1h:]
-    ),
-    0
+      sum by (host) (increase(sol_event_system_ha_redun_group_node_joined_total[30d]))
+      or on(host)
+         0 * sum by (host) (increase(sol_event_system_ha_redun_group_node_left_total[30d]))
+    )
   )
-) > 0
+  -
+  min_over_time(
+    (
+      sum by (host) (increase(sol_event_system_ha_redun_group_node_left_total[30d])) -
+      (
+        sum by (host) (increase(sol_event_system_ha_redun_group_node_joined_total[30d]))
+        or on(host)
+           0 * sum by (host) (increase(sol_event_system_ha_redun_group_node_left_total[30d]))
+      )
+    )[30d:1h]
+  ),
+0)
