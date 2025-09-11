@@ -1,6 +1,7 @@
-# Alert if we saw a node_left in last hour but no corresponding node_joined
+# Focus on recent activity only (last hour)
 (
-  increase(sol_event_system_ha_redun_group_node_left_total[1h]) > 0
-  unless
-  increase(sol_event_system_ha_redun_group_node_joined_total[1h]) > 0
-)
+  increase(sol_event_system_ha_redun_group_node_left_total[1h])
+  -
+  (increase(sol_event_system_ha_redun_group_node_joined_total[1h]) or 
+   on(host) increase(sol_event_system_ha_redun_group_node_left_total[1h]) * 0)
+) > 0
