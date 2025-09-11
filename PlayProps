@@ -1,9 +1,6 @@
-# 90d window; adjust to your retention
-solace_ha_left_unmatched_by_host =
-clamp_min(
-  sum by (host) (increase(sol_event_system_ha_redun_group_node_left_total[90d])) -
-  (
-    sum by (host) (increase(sol_event_system_ha_redun_group_node_joined_total[90d]))
-    or on(host) 0 * sum by (host) (increase(sol_event_system_ha_redun_group_node_left_total[90d]))
-  ),
-0)
+# Alert if we saw a node_left in last hour but no corresponding node_joined
+(
+  increase(sol_event_system_ha_redun_group_node_left_total[1h]) > 0
+  unless
+  increase(sol_event_system_ha_redun_group_node_joined_total[1h]) > 0
+)
