@@ -1,21 +1,2 @@
-clamp_min(
-  (
-    sum by (vpn, host) (increase(sol_event_vpn_bridging_link_down_total[15m])) -
-    (
-      sum by (vpn, host) (increase(sol_event_vpn_bridging_link_up_total[15m]))
-      or on(vpn, host)
-         0 * sum by (vpn, host) (increase(sol_event_vpn_bridging_link_down_total[15m]))
-    )
-  )
-  -
-  min_over_time(
-    (
-      sum by (vpn, host) (increase(sol_event_vpn_bridging_link_down_total[15m])) -
-      (
-        sum by (vpn, host) (increase(sol_event_vpn_bridging_link_up_total[15m]))
-        or on(vpn, host)
-           0 * sum by (vpn, host) (increase(sol_event_vpn_bridging_link_down_total[15m]))
-      )
-    )[15m:1s]
-  ),
-0)
+{__name__="sol_event_vpn_bridging_link_down_total", host="hk_host", http.scheme="http", net.host.name="dceprd1-syslog-collector", net.host.port="8081", server.address="dceprd1-syslog-collector", server.port="8081", service.instance.id="dceprd1-syslog-collector:8081", service.name="log-metrics", severity="WARN", url.scheme="http", vpn="vpn-cb-reference-data-p1"}
+{__name__="sol_event_vpn_bridging_link_down_total", host="sg_host", http.scheme="http", net.host.name="dceprd1-syslog-collector", net.host.port="8081", server.address="dceprd1-syslog-collector", server.port="8081", service.instance.id="dceprd1-syslog-collector:8081", service.name="log-metrics", severity="WARN", url.scheme="http", vpn="vpn-cb-reference-data-p1"}
