@@ -1,19 +1,21 @@
 clamp_min(
   (
-    sum by (vpn, host) (increase(sol_event_system_cfgsync_down_total[1h] offset 2m)) -
+    sum by (vpn, host) (increase(sol_event_system_cfgsync_down_total[6h] offset 10s)) -
     (
-      sum by (vpn, host) (increase(sol_event_system_cfgsync_up_total[1h] offset 2m))
-      or on(vpn, host) 0 * sum by (vpn, host) (increase(sol_event_system_cfgsync_down_total[1h] offset 2m))
+      sum by (vpn, host) (increase(sol_event_system_cfgsync_up_total[6h] offset 10s))
+      or on(vpn, host)
+         0 * sum by (vpn, host) (increase(sol_event_system_cfgsync_down_total[6h] offset 10s))
     )
   )
   -
   min_over_time(
     (
-      sum by (vpn, host) (increase(sol_event_system_cfgsync_down_total[1h] offset 2m)) -
+      sum by (vpn, host) (increase(sol_event_system_cfgsync_down_total[6h] offset 10s)) -
       (
-        sum by (vpn, host) (increase(sol_event_system_cfgsync_up_total[1h] offset 2m))
-        or on(vpn, host) 0 * sum by (vpn, host) (increase(sol_event_system_cfgsync_down_total[1h] offset 2m))
+        sum by (vpn, host) (increase(sol_event_system_cfgsync_up_total[6h] offset 10s))
+        or on(vpn, host)
+           0 * sum by (vpn, host) (increase(sol_event_system_cfgsync_down_total[6h] offset 10s))
       )
-    )[1h:15m]
+    )[6h:30s]
   ),
-0) > 0
+0)
