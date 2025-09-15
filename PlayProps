@@ -1,21 +1,3 @@
-clamp_min(
-  (
-    sum by (vpn, host) (increase(sol_event_system_cfgsync_down_total[6h] offset 10s)) -
-    (
-      sum by (vpn, host) (increase(sol_event_system_cfgsync_up_total[6h] offset 10s))
-      or on(vpn, host)
-         0 * sum by (vpn, host) (increase(sol_event_system_cfgsync_down_total[6h] offset 10s))
-    )
-  )
-  -
-  min_over_time(
-    (
-      sum by (vpn, host) (increase(sol_event_system_cfgsync_down_total[6h] offset 10s)) -
-      (
-        sum by (vpn, host) (increase(sol_event_system_cfgsync_up_total[6h] offset 10s))
-        or on(vpn, host)
-           0 * sum by (vpn, host) (increase(sol_event_system_cfgsync_down_total[6h] offset 10s))
-      )
-    )[6h:30s]
-  ),
-0)
+sol_event_system_ha_redun_state_down_total
+sol_event_system_ha_redun_group_node_left_total
+sol_event_vpn_bridging_link_down_total
