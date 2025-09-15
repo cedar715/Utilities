@@ -1,2 +1,15 @@
-{__name__="sol_event_vpn_bridging_link_down_total", host="hk_host", http.scheme="http", net.host.name="dceprd1-syslog-collector", net.host.port="8081", server.address="dceprd1-syslog-collector", server.port="8081", service.instance.id="dceprd1-syslog-collector:8081", service.name="log-metrics", severity="WARN", url.scheme="http", vpn="vpn-cb-reference-data-p1"}
-{__name__="sol_event_vpn_bridging_link_down_total", host="sg_host", http.scheme="http", net.host.name="dceprd1-syslog-collector", net.host.port="8081", server.address="dceprd1-syslog-collector", server.port="8081", service.instance.id="dceprd1-syslog-collector:8081", service.name="log-metrics", severity="WARN", url.scheme="http", vpn="vpn-cb-reference-data-p1"}
+groups:
+- name: ha-map
+  interval: 1m
+  rules:
+  - record: ha_pair_host_map
+    expr: 1
+    labels:
+      host: "hk_host"
+      ha_pair: "hk-sg-1"
+  - record: ha_pair_host_map
+    expr: 1
+    labels:
+      host: "sg_host"
+      ha_pair: "hk-sg-1"
+  # add more hosts/ha_pairs as needed
