@@ -1,21 +1,9 @@
 {{ define "nr_subject" -}}
-  {{- $f := .Alerts.Firing -}}
-  {{- if gt (len $f) 0 -}}
-    {{- /* Oldest start among firing alerts in this notification */ -}}
-    {{- $oldest := (index $f 0).StartsAt -}}
-    {{- range $f -}}
-      {{- if lt .StartsAt $oldest }}{{ $oldest = .StartsAt }}{{ end -}}
-    {{- end -}}
-    {{- $age := (time.Now).Sub $oldest -}}
-    {{- /* Choose a window smaller than your repeat interval, e.g., 5m */ -}}
-    {{- if lt $age (duration "5m") -}}
-      [NEW] {{ (index $f 0).Labels.alertname }}
-    {{- else -}}
-      [REPEAT] {{ (index $f 0).Labels.alertname }}
-    {{- end -}}
+  {{- if gt (len .Alerts.Firing) 0 -}}
+    [NEW] {{ (index .Alerts.Firing 0).Labels.alertname }}
   {{- else if gt (len .Alerts.Resolved) 0 -}}
     [RESOLVED] {{ (index .Alerts.Resolved 0).Labels.alertname }}
   {{- else -}}
-    [ALERT]
+    [REPEAT] {{ (index .Alerts.Firing 0).Labels.alertname }}
   {{- end -}}
 {{- end }}
