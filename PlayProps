@@ -1,15 +1,21 @@
-groups:
-- name: ha-map
-  interval: 1m
-  rules:
-  - record: ha_pair_host_map
-    expr: 1
-    labels:
-      host: "hk_host"
-      ha_pair: "hk-sg-1"
-  - record: ha_pair_host_map
-    expr: 1
-    labels:
-      host: "sg_host"
-      ha_pair: "hk-sg-1"
-  # add more hosts/ha_pairs as needed
+{{ define "nr_subject" -}}
+  {{- $f := .Alerts.Firing -}}
+  {{- if gt (len $f) 0 -}}
+    {{- /* Oldest start among firing alerts in this notification */ -}}
+    {{- $oldest := (index $f 0).StartsAt -}}
+    {{- range $f -}}
+      {{- if lt .StartsAt $oldest }}{{ $oldest = .StartsAt }}{{ end -}}
+    {{- end -}}
+    {{- $age := (time.Now).Sub $oldest -}}
+    {{- /* Choose a window smaller than your repeat interval, e.g., 5m */ -}}
+    {{- if lt $age (duration "5m") -}}
+      [NEW] {{ (index $f 0).Labels.alertname }}
+    {{- else -}}
+      [REPEAT] {{ (index $f 0).Labels.alertname }}
+    {{- end -}}
+  {{- else if gt (len .Alerts.Resolved) 0 -}}
+    [RESOLVED] {{ (index .Alerts.Resolved 0).Labels.alertname }}
+  {{- else -}}
+    [ALERT]
+  {{- end -}}
+{{- end }}
