@@ -9,9 +9,9 @@
             snap.forEach((key, st) -> {
                 Parsed parsed = parseKey(key);
                 if (parsed != null && parsed.tags() != null) {
-                    // Create rows with explicit Number suppliers
-                    activeRows.add(MultiGauge.Row.of(parsed.tags(), () -> st.active()));
-                    sinceRows.add(MultiGauge.Row.of(parsed.tags(), () -> st.sinceEpochSec()));
+                    // Use the Row.of method with tags and a Number value
+                    activeRows.add(MultiGauge.Row.of(parsed.tags(), st.active()));
+                    sinceRows.add(MultiGauge.Row.of(parsed.tags(), st.sinceEpochSec()));
                 }
             });
 
