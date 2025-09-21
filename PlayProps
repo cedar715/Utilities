@@ -1,57 +1,21 @@
-// src/main/java/com/acme/solace/obz/LatchingStateStore.java
-package com.acme.solace.obz;
-
-import java.util.Map;
-
-public interface LatchingStateStore {
-  record State(boolean active, long sinceEpochSec) {}
-  State get(String key);
-  void put(String key, State state);
-  Map<String, State> dump();  // for startup re-expose
-}
-
-// src/main/java/com/acme/solace/obz/MapDbLatchingStateStore.java
-package com.acme.solace.obz;
-
-import org.mapdb.*;
-import org.springframework.stereotype.Component;
-
-import java.nio.file.Path;
-import java.util.Map;
-
-@Component
-public class MapDbLatchingStateStore implements LatchingStateStore {
-  private final DB db;
-  private final HTreeMap<String, byte[]> map;
-
-  public MapDbLatchingStateStore() {
-    this(Path.of("data","solace-latch-state.db").toString());
-  }
-  public MapDbLatchingStateStore(String filePath) {
-    this.db = DBMaker.fileDB(filePath).fileMmapEnableIfSupported().transactionEnable().closeOnJvmShutdown().make();
-    this.map = db.hashMap("latches", Serializer.STRING, Serializer.BYTE_ARRAY).createOrOpen();
-  }
-
-  @Override public State get(String key) {
-    var b = map.get(key);
-    if (b == null) return new State(false, 0L);
-    // very small custom serialization: 1 byte active + 8 bytes since
-    boolean active = b[0] == 1;
-    long since = 0;
-    for (int i=1;i<=8;i++) since = (since<<8) | (b[i] & 0xff);
-    return new State(active, since);
-  }
-
-  @Override public void put(String key, State s) {
-    byte[] b = new byte[9];
-    b[0] = (byte)(s.active()?1:0);
-    long x = s.sinceEpochSec();
-    for (int i=8;i>=1;i--) { b[i] = (byte)(x & 0xff); x >>= 8; }
-    map.put(key, b);
-    db.commit();
-  }
-
-  @Override public Map<String, State> dump() {
-    return map.getEntries(); // MapDB returns a read-only view
-  }
-}
+# solace-event-mappings.yml  (mount at /config/solace-event-mappings.yml)
+solace:
+  latch:
+    keyspace: solace:latch
+    refresh-interval: 5000   # ms for exporter refresh + snapshot cache TTL
+  event-mappings:
+    - problem: SYSTEM_HA_REDUN_GROUP_NODE_LEFT
+      clear:   SYSTEM_HA_REDUN_GROUP_NODE_JOINED
+      metric:  sol_state_ha_redundancy_group_node
+      ttl:     86400           # 24h
+      labels:  [vpn, host, group]
+    - problem: VPN_AD_MSG_SPOOL_HIGH
+      clear:   VPN_AD_MSG_SPOOL_HIGH_CLEAR
+      metric:  sol_state_vpn_msg_spool_threshold
+      ttl:     7200            # 2h
+      labels:  [vpn, host]
+    - problem: CLIENT_CLIENT_CONNECT_FAIL
+      clear:   CLIENT_CLIENT_CONNECT
+      metric:  sol_state_client_connection
+      ttl:     3600
+      labels:  [vpn, host, client_username]
