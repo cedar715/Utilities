@@ -1,25 +1,61 @@
-// EventMappingConfig.java
+package com.acme.solace.obz.config;
+
+import jakarta.annotation.PostConstruct;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.NotNull;
+
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Optional;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.validation.annotation.Validated;
+
 @Configuration
-@EnableConfigurationProperties
 @ConfigurationProperties(prefix = "solace")
 @Validated
 public class EventMappingConfig {
+
   @Valid @NotEmpty
   private List<EventMapping> eventMappings = new ArrayList<>();
+
   @Valid @NotNull
   private LatchProps latch = new LatchProps();
 
-  @Data public static class LatchProps {
-    @NotBlank private String keyspace = "solace:latch";
-    @Min(1000) private long refreshInterval = 5000; // ms
+  public static class LatchProps {
+    @NotBlank
+    private String keyspace = "solace:latch";
+    @Min(1000)
+    private long refreshInterval = 5000; // ms
+
+    public String getKeyspace() { return keyspace; }
+    public void setKeyspace(String keyspace) { this.keyspace = keyspace; }
+    public long getRefreshInterval() { return refreshInterval; }
+    public void setRefreshInterval(long refreshInterval) { this.refreshInterval = refreshInterval; }
   }
 
-  @Data public static class EventMapping {
+  public static class EventMapping {
     @NotBlank private String problem;
     @NotBlank private String clear;
     @NotBlank private String metric;
-    @Min(0) private long ttl = 0;             // seconds; 0 disables TTL
+    @Min(0)   private long ttl = 0;                 // seconds; 0 disables TTL
     @NotEmpty private List<@NotBlank String> labels;
+
+    public String getProblem() { return problem; }
+    public void setProblem(String problem) { this.problem = problem; }
+    public String getClear() { return clear; }
+    public void setClear(String clear) { this.clear = clear; }
+    public String getMetric() { return metric; }
+    public void setMetric(String metric) { this.metric = metric; }
+    public long getTtl() { return ttl; }
+    public void setTtl(long ttl) { this.ttl = ttl; }
+    public List<String> getLabels() { return labels; }
+    public void setLabels(List<String> labels) { this.labels = labels; }
   }
 
   public Optional<EventMapping> findByEvent(String eventName) {
@@ -45,4 +81,9 @@ public class EventMappingConfig {
         throw new IllegalStateException("Duplicate clear event: " + m.getClear());
     }
   }
+
+  public List<EventMapping> getEventMappings() { return eventMappings; }
+  public void setEventMappings(List<EventMapping> eventMappings) { this.eventMappings = eventMappings; }
+  public LatchProps getLatch() { return latch; }
+  public void setLatch(LatchProps latch) { this.latch = latch; }
 }
