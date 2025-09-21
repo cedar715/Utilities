@@ -1,5 +1,35 @@
-Problems with Current Approach
+package com.acme.solace.obz;
 
-Semantic Mismatch: Counter metrics are designed for rate-based monitoring (e.g., errors per minute), not state tracking. Events like SYSTEM_HA_REDUN_GROUP_NODE_LEFT represent state changes, not rates.
-False Resolution: Your Grafana alert resolves based on "no new occurrences" rather than actual state normalization. A node being down for days would show as "resolved" after 1 hour of no new events.
-Loss of State Context: You can't determine the current state of the system, only that events occurred in the past.
+public enum ProblemKind {
+  // High-level system / infra
+  CFGSYNC,                   // SYSTEM_CFGSYNC_DOWN / _UP
+  HA_NODE,                   // SYSTEM_HA_REDUN_GROUP_NODE_LEFT / _JOINED
+  HA_REDUNDANCY,             // SYSTEM_HA_REDUN_STATE_DOWN / _UP
+  HA_VRRP,                   // SYSTEM_HA_VRRP_STATE_DOWN / _UP
+  CLUSTER_LINK,              // SYSTEM_CLUSTERING_LINK_DOWN / _UP
+  DNS_SERVER,                // SYSTEM_DNS_NAME_SERVER_DOWN / _UP
+  NTP_SERVER,                // SYSTEM_NTP_SERVER_DOWN / _UP
+  PTP_SYNC,                  // SYSTEM_PTP_SYNC_DOWN / _UP
+  ETH_LINK,                  // SYSTEM_LINK_ETH_LINK_DOWN / _UP
+  ADB_LINK,                  // SYSTEM_LINK_ADB_LINK_DOWN / _UP
+  DISK_ARRAY_PATH,           // SYSTEM_LINK_PATH_TO_DISK_ARRAY_DOWN / _UP
+
+  // Routing
+  ROUTING_CSPF_CONN,         // SYSTEM_ROUTING_CSPF_CONN_DOWN / _UP
+
+  // HA VR role changes are informational; not paired here
+
+  // Capacity / thresholds (SYSTEM level)
+  SYS_MSG_SPOOL,             // SYSTEM_AD_MSG_SPOOL_HIGH / _HIGH_CLEAR
+  SYS_FAN,                   // SYSTEM_CHASSIS_FAN_HIGH / _HIGH_CLEAR
+  SYS_TEMP_HIGH,             // SYSTEM_CHASSIS_TEMPERATURE_HIGH / _HIGH_CLEAR
+  SYS_DISK_UTIL,             // SYSTEM_CHASSIS_DISK_UTILIZATION_HIGH / _HIGH_CLEAR
+  SYS_STORAGE_ELEM_USAGE,    // SYSTEM_CHASSIS_STORAGE_ELEMENT_USAGE_HIGH / _HIGH_CLEAR
+  SSL_CONNECTIONS,           // SYSTEM_SSL_CONNECTIONS_HIGH / _HIGH_CLEAR
+
+  // VPN-level thresholds
+  VPN_MSG_SPOOL,             // VPN_AD_MSG_SPOOL_HIGH / _HIGH_CLEAR
+  VPN_EGRESS_FLOWS,          // VPN_AD_EGRESS_FLOWS_HIGH / _HIGH_CLEAR
+  VPN_INGRESS_FLOWS,         // VPN_AD_INGRESS_FLOWS_HIGH / _HIGH_CLEAR
+  VPN_ENDPOINTS              // VPN_AD_ENDPOINTS_HIGH / _HIGH_CLEAR
+}
