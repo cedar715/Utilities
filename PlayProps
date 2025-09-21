@@ -1,9 +1,5 @@
-{{ define "nr_subject" -}}
-  {{- if gt (len .Alerts.Firing) 0 -}}
-    [NEW] {{ (index .Alerts.Firing 0).Labels.alertname }}
-  {{- else if gt (len .Alerts.Resolved) 0 -}}
-    [RESOLVED] {{ (index .Alerts.Resolved 0).Labels.alertname }}
-  {{- else -}}
-    [REPEAT] {{ (index .Alerts.Firing 0).Labels.alertname }}
-  {{- end -}}
-{{- end }}
+Problems with Current Approach
+
+Semantic Mismatch: Counter metrics are designed for rate-based monitoring (e.g., errors per minute), not state tracking. Events like SYSTEM_HA_REDUN_GROUP_NODE_LEFT represent state changes, not rates.
+False Resolution: Your Grafana alert resolves based on "no new occurrences" rather than actual state normalization. A node being down for days would show as "resolved" after 1 hour of no new events.
+Loss of State Context: You can't determine the current state of the system, only that events occurred in the past.
