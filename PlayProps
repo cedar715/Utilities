@@ -1,16 +1,66 @@
-private List<String> scanKeys(String pattern) {
-  List<String> keys = new ArrayList<>();
-  redis.execute((RedisCallback<Void>) conn -> {
-    // Use the module-specific KeyCommands API rather than the deprecated conn.scan(...)
-    try (Cursor<byte[]> cursor = conn.keyCommands().scan(
-            ScanOptions.scanOptions().match(pattern).count(1000).build())) {
-      cursor.forEachRemaining(k -> keys.add(new String(k, StandardCharsets.UTF_8)));
-    } catch (DataAccessException e) {
-      throw e;
-    } catch (Exception e) {
-      throw new IllegalStateException(e);
+package com.acme.solace.obz.metrics;
+
+import com.acme.solace.obz.config.EventMappingConfig;
+import com.acme.solace.obz.state.LatchingStateStore;
+
+import java.util.ArrayList;
+
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.MultiGauge;
+import io.micrometer.core.instrument.Tags;
+import io.micrometer.core.instrument.binder.MeterBinder;
+
+import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Component;
+
+import lombok.RequiredArgsConstructor;
+
+@Component
+@EnableScheduling
+@RequiredArgsConstructor
+public class LatchingMetricsExporter implements MeterBinder {
+
+  private final LatchingStateStore store;
+  private final EventMappingConfig cfg;
+
+  private MultiGauge activeGauge;
+  private MultiGauge sinceGauge;
+
+  @Override
+  public void bindTo(MeterRegistry registry) {
+    activeGauge = MultiGauge.builder("sol_state_active").register(registry);
+    sinceGauge  = MultiGauge.builder("sol_state_since_unixtime").register(registry);
+    refresh();
+  }
+
+  @Scheduled(fixedDelayString = "${solace.latch.refresh-interval:5000}")
+  public void refresh() {
+    var snap = store.snapshot();
+    var activeRows = new ArrayList<MultiGauge.Row<Integer>>(snap.size());
+    var sinceRows  = new ArrayList<MultiGauge.Row<Long>>(snap.size());
+
+    snap.forEach((key, st) -> {
+      var parsed = parseKey(key);
+      activeRows.add(MultiGauge.Row.of(parsed.tags, () -> st.active()));
+      sinceRows.add(MultiGauge.Row.of(parsed.tags, () -> st.sinceEpochSec()));
+    });
+
+    activeGauge.register(activeRows, true);
+    sinceGauge.register(sinceRows, true);
+  }
+
+  private record Parsed(String metricBase, Tags tags) {}
+
+  private Parsed parseKey(String redisKey) {
+    String body = redisKey.substring(redisKey.indexOf("hash:") + 5);
+    String[] parts = body.split("\\|");
+    String base = parts[0];
+    Tags t = Tags.of("metric_base", base);
+    for (int i = 1; i < parts.length; i++) {
+      String[] kv = parts[i].split("=", 2);
+      t = t.and(kv[0], kv[1]);
     }
-    return null;
-  });
-  return keys;
+    return new Parsed(base, t);
+  }
 }
