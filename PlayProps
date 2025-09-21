@@ -1,17 +1,200 @@
 package com.acme.solace.obz.state;
 
+import com.acme.solace.obz.config.EventMappingConfig;
+
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.stream.Collectors;
 
-public interface LatchingStateStore {
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
-  record State(int active, long sinceEpochSec) {}
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataAccessException;
+import org.springframework.data.redis.connection.RedisConnection;
+import org.springframework.data.redis.connection.RedisStringCommands;
+import org.springframework.data.redis.connection.cursor.Cursor;
+import org.springframework.data.redis.core.RedisCallback;
+import org.springframework.data.redis.core.ScanOptions;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Component;
 
-  /** 0->1 sets since to now; 1->1 keeps since; applies TTL if > 0 (seconds). */
-  void setProblem(String metricBase, Map<String,String> labels, long nowEpochSec, long ttlSec);
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class RedisLatchingStateStore implements LatchingStateStore {
 
-  /** Sets active=0 and persists the key (removes TTL). */
-  void setClear(String metricBase, Map<String,String> labels, long nowEpochSec);
+  private final StringRedisTemplate redis;
+  private final EventMappingConfig cfg;
 
-  /** Snapshot of all keys for export to metrics. */
-  Map<String, State> snapshot();
+  @Value("${spring.application.name:obz}")
+  private String appName;
+
+  @Value("${HOSTNAME:unknown}")
+  private String podName;
+
+  // Local fallback buffer if Redis is unavailable
+  private final ConcurrentMap<String, State> localFallbackCache = new ConcurrentHashMap<>();
+
+  private final DefaultRedisScript<Long> luaSetProblem = new DefaultRedisScript<>(
+      """
+      -- KEYS[1] hash key; ARGV[1]=nowSec ARGV[2]=ttlSec ARGV[3]=processing_pod
+      local a = redis.call('HGET', KEYS[1], 'active')
+      if (not a) or (a == '0') then
+        redis.call('HMSET', KEYS[1],
+          'active','1',
+          'since',ARGV[1],
+          'last_event_time',ARGV[1],
+          'event_count','1',
+          'processing_pod',ARGV[3])
+      else
+        redis.call('HINCRBY', KEYS[1], 'event_count', 1)
+        redis.call('HSET', KEYS[1], 'last_event_time', ARGV[1])
+        redis.call('HSET', KEYS[1], 'active', '1')
+        redis.call('HSET', KEYS[1], 'processing_pod', ARGV[3])
+      end
+      if tonumber(ARGV[2]) and tonumber(ARGV[2]) > 0 then
+        redis.call('EXPIRE', KEYS[1], ARGV[2])
+      end
+      return 1
+      """,
+      Long.class
+  );
+
+  private final DefaultRedisScript<Long> luaSetClear = new DefaultRedisScript<>(
+      """
+      -- KEYS[1] hash key; ARGV[1]=nowSec ARGV[2]=processing_pod
+      redis.call('HSET', KEYS[1], 'active', '0')
+      redis.call('HSET', KEYS[1], 'last_event_time', ARGV[1])
+      redis.call('HSET', KEYS[1], 'processing_pod', ARGV[2])
+      redis.call('PERSIST', KEYS[1])
+      return 1
+      """,
+      Long.class
+  );
+
+  @Override
+  public void setProblem(String metricBase, Map<String,String> labels, long nowEpochSec, long ttlSec) {
+    var key = hashKey(metricBase, labels);
+    try {
+      redis.execute(luaSetProblem, List.of(key),
+          String.valueOf(nowEpochSec), String.valueOf(ttlSec), processingPod());
+    } catch (Exception e) {
+      log.error("Redis setProblem failed; buffering locally key={}", key, e);
+      localFallbackCache.put(key, new State(1, nowEpochSec));
+    }
+  }
+
+  @Override
+  public void setClear(String metricBase, Map<String,String> labels, long nowEpochSec) {
+    var key = hashKey(metricBase, labels);
+    try {
+      redis.execute(luaSetClear, List.of(key),
+          String.valueOf(nowEpochSec), processingPod());
+    } catch (Exception e) {
+      log.error("Redis setClear failed; buffering locally key={}", key, e);
+      localFallbackCache.put(key, new State(0, nowEpochSec));
+    }
+  }
+
+  @Scheduled(fixedDelayString = "${solace.latch.refresh-interval:5000}")
+  public void syncFallbackCache() {
+    if (localFallbackCache.isEmpty()) return;
+    try {
+      localFallbackCache.forEach((key, st) -> {
+        if (st.active() == 1) {
+          redis.execute(luaSetProblem, List.of(key),
+              String.valueOf(st.sinceEpochSec()), String.valueOf(86400), processingPod());
+        } else {
+          redis.execute(luaSetClear, List.of(key),
+              String.valueOf(st.sinceEpochSec()), processingPod());
+        }
+      });
+      localFallbackCache.clear();
+    } catch (Exception e) {
+      // keep for next retry
+    }
+  }
+
+  // Small cache to avoid heavy SCAN/HGET every scrape
+  private volatile Map<String, State> cachedSnapshot = null;
+  private volatile long cachedAtMs = 0;
+
+  @Override
+  public Map<String, State> snapshot() {
+    long cacheTtlMs = cfg.latchProps().getRefreshInterval();
+    long now = System.currentTimeMillis();
+    if (cachedSnapshot != null && (now - cachedAtMs) < cacheTtlMs) return cachedSnapshot;
+
+    var pattern = cfg.latchProps().getKeyspace() + ":hash:*";
+    List<String> keys = scanKeys(pattern);
+
+    List<Object> pipelined = redis.executePipelined((RedisCallback<Object>) connection -> {
+      for (var k : keys) {
+        connection.hashCommands().hMGet(
+            k.getBytes(StandardCharsets.UTF_8),
+            "active".getBytes(StandardCharsets.UTF_8),
+            "since".getBytes(StandardCharsets.UTF_8)
+        );
+      }
+      return null;
+    });
+
+    Map<String, State> out = new LinkedHashMap<>(keys.size());
+    for (int i = 0; i < keys.size(); i++) {
+      @SuppressWarnings("unchecked")
+      List<byte[]> vals = (List<byte[]>) pipelined.get(i);
+      int active = parseInt(vals.get(0), 0);
+      long since  = parseLong(vals.get(1), 0L);
+      out.put(keys.get(i), new State(active, since));
+    }
+    cachedSnapshot = out;
+    cachedAtMs = now;
+    return out;
+  }
+
+  // ---- helpers ----
+  private List<String> scanKeys(String pattern) {
+    List<String> keys = new ArrayList<>();
+    redis.execute((RedisCallback<Void>) (RedisConnection conn) -> {
+      try (Cursor<byte[]> cursor = conn.scan(
+          ScanOptions.scanOptions().match(pattern).count(1000).build())) {
+        cursor.forEachRemaining(k -> keys.add(new String(k, StandardCharsets.UTF_8)));
+      } catch (DataAccessException e) {
+        throw e;
+      } catch (Exception e) {
+        throw new IllegalStateException(e);
+      }
+      return null;
+    });
+    return keys;
+  }
+
+  private int parseInt(byte[] b, int d) {
+    try { return Integer.parseInt(b == null ? "" : new String(b, StandardCharsets.UTF_8)); }
+    catch (Exception e) { return d; }
+  }
+
+  private long parseLong(byte[] b, long d) {
+    try { return Long.parseLong(b == null ? "" : new String(b, StandardCharsets.UTF_8)); }
+    catch (Exception e) { return d; }
+  }
+
+  private String processingPod() { return appName + ":" + podName; }
+
+  private String hashKey(String metricBase, Map<String,String> labels) {
+    return cfg.latchProps().getKeyspace() + ":hash:" + metricBase + "|" +
+        labels.entrySet().stream()
+            .sorted(Map.Entry.comparingByKey())
+            .map(e -> e.getKey() + "=" + e.getValue().toLowerCase(Locale.ROOT))
+            .collect(Collectors.joining("|"));
+  }
 }
