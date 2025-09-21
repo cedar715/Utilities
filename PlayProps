@@ -1,10 +1,748 @@
-@Scheduled(fixedDelayString = "${solace.latch.refresh-interval:5000}")
+// ============================================================================
+// 1) pom.xml dependencies
+// ============================================================================
+/*
+<dependencies>
+  <!-- Spring Boot Core -->
+  <dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter</artifactId>
+  </dependency>
+  <dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-actuator</artifactId>
+  </dependency>
+  <dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-validation</artifactId>
+  </dependency>
+  
+  <!-- Redis -->
+  <dependency>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-data-redis</artifactId>
+  </dependency>
+  
+  <!-- Metrics -->
+  <dependency>
+    <groupId>io.micrometer</groupId>
+    <artifactId>micrometer-registry-prometheus</artifactId>
+  </dependency>
+  
+  <!-- Utilities -->
+  <dependency>
+    <groupId>org.projectlombok</groupId>
+    <artifactId>lombok</artifactId>
+    <scope>provided</scope>
+  </dependency>
+  <dependency>
+    <groupId>com.google.guava</groupId>
+    <artifactId>guava</artifactId>
+    <version>32.1.3-jre</version>
+  </dependency>
+</dependencies>
+*/
+
+// ============================================================================
+// 2) application.yml
+// ============================================================================
+/*
+spring:
+  application:
+    name: solace-event-processor
+  redis:
+    host: ${REDIS_HOST:localhost}
+    port: ${REDIS_PORT:6379}
+    timeout: 2s
+    lettuce:
+      pool:
+        max-active: 10
+        max-idle: 10
+        min-idle: 5
+        max-wait: 2s
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: prometheus,health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+    tags:
+      application: ${spring.application.name}
+      pod: ${HOSTNAME:unknown}
+
+solace:
+  latch:
+    keyspace: "solace:latch"
+    refresh-interval: 5000
+  event-mappings:
+    - problem: SYSTEM_HA_REDUN_GROUP_NODE_LEFT
+      clear: SYSTEM_HA_REDUN_GROUP_NODE_JOINED
+      metric: sol_state_ha_redundancy_group_node
+      ttl: 86400
+      labels: [vpn, host, node_name]
+    - problem: VPN_AD_MSG_SPOOL_HIGH
+      clear: VPN_AD_MSG_SPOOL_HIGH_CLEAR
+      metric: sol_state_vpn_msg_spool_threshold
+      ttl: 7200
+      labels: [vpn, host]
+    - problem: CLIENT_CLIENT_CONNECT_FAIL
+      clear: CLIENT_CLIENT_CONNECT
+      metric: sol_state_client_connection
+      ttl: 3600
+      labels: [vpn, client_name, client_username]
+*/
+
+// ============================================================================
+// 3) Main Application Class
+// ============================================================================
+package com.acme.solace.obz;
+
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.scheduling.annotation.EnableScheduling;
+
+@SpringBootApplication
+@EnableScheduling
+public class SolaceEventProcessorApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(SolaceEventProcessorApplication.class, args);
+    }
+}
+
+// ============================================================================
+// 4) Redis Configuration
+// ============================================================================
+package com.acme.solace.obz.config;
+
+import io.lettuce.core.ClientOptions;
+import io.lettuce.core.SocketOptions;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
+import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
+import org.springframework.data.redis.connection.lettuce.LettuceClientConfiguration;
+import org.springframework.data.redis.connection.lettuce.LettuceConnectionFactory;
+import org.springframework.data.redis.core.StringRedisTemplate;
+
+import java.time.Duration;
+
+@Configuration
+public class RedisConfig {
+
+    @Value("${spring.redis.host:localhost}")
+    private String redisHost;
+
+    @Value("${spring.redis.port:6379}")
+    private int redisPort;
+
+    @Value("${spring.redis.timeout:2s}")
+    private Duration timeout;
+
+    @Bean
+    public LettuceConnectionFactory redisConnectionFactory() {
+        SocketOptions socketOptions = SocketOptions.builder()
+                .connectTimeout(timeout)
+                .keepAlive(true)
+                .tcpNoDelay(true)
+                .build();
+
+        ClientOptions clientOptions = ClientOptions.builder()
+                .socketOptions(socketOptions)
+                .autoReconnect(true)
+                .pingBeforeActivateConnection(true)
+                .build();
+
+        LettuceClientConfiguration clientConfig = LettuceClientConfiguration.builder()
+                .clientOptions(clientOptions)
+                .commandTimeout(timeout)
+                .build();
+
+        RedisStandaloneConfiguration serverConfig = 
+                new RedisStandaloneConfiguration(redisHost, redisPort);
+
+        return new LettuceConnectionFactory(serverConfig, clientConfig);
+    }
+
+    @Bean
+    public StringRedisTemplate stringRedisTemplate(RedisConnectionFactory connectionFactory) {
+        return new StringRedisTemplate(connectionFactory);
+    }
+}
+
+// ============================================================================
+// 5) Event Mapping Configuration
+// ============================================================================
+package com.acme.solace.obz.config;
+
+import jakarta.annotation.PostConstruct;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.NotNull;
+import lombok.Data;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.validation.annotation.Validated;
+
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
+
+@Configuration
+@ConfigurationProperties(prefix = "solace")
+@Validated
+@Data
+@Slf4j
+public class EventMappingConfig {
+
+    @Valid @NotEmpty
+    private List<EventMapping> eventMappings = new ArrayList<>();
+
+    @Valid @NotNull
+    private LatchProps latch = new LatchProps();
+
+    @Data
+    public static class LatchProps {
+        @NotBlank
+        private String keyspace = "solace:latch";
+        
+        @Min(1000)
+        private long refreshInterval = 5000; // ms
+        
+        @Min(100)
+        private long cacheRetentionMs = 3000; // snapshot cache retention
+        
+        @Min(1)
+        private int maxRetries = 3;
+        
+        @Min(100)
+        private long retryDelayMs = 1000;
+    }
+
+    @Data
+    public static class EventMapping {
+        @NotBlank 
+        private String problem;
+        
+        @NotBlank 
+        private String clear;
+        
+        @NotBlank 
+        private String metric;
+        
+        @Min(0)
+        private long ttl = 0; // seconds; 0 disables TTL
+        
+        @NotEmpty 
+        private List<@NotBlank String> labels;
+    }
+
+    public Optional<EventMapping> findByEvent(String eventName) {
+        if (eventName == null) return Optional.empty();
+        return eventMappings.stream()
+                .filter(m -> m.getProblem().equals(eventName) || m.getClear().equals(eventName))
+                .findFirst();
+    }
+
+    public boolean isProblem(EventMapping m, String eventName) {
+        return m != null && m.getProblem().equals(eventName);
+    }
+
+    public LatchProps latchProps() { 
+        return latch; 
+    }
+
+    @PostConstruct
+    void validateConfiguration() {
+        // Validate no duplicate events
+        Set<String> seen = new HashSet<>();
+        for (EventMapping m : eventMappings) {
+            if (!seen.add(m.getProblem())) {
+                throw new IllegalStateException("Duplicate problem event: " + m.getProblem());
+            }
+            if (!seen.add(m.getClear())) {
+                throw new IllegalStateException("Duplicate clear event: " + m.getClear());
+            }
+        }
+        
+        // Validate keyspace
+        if (latch.getKeyspace().contains("|") || latch.getKeyspace().isEmpty()) {
+            throw new IllegalStateException("Invalid keyspace: " + latch.getKeyspace());
+        }
+        
+        log.info("Loaded {} event mappings with keyspace: {}", 
+                eventMappings.size(), latch.getKeyspace());
+    }
+}
+
+// ============================================================================
+// 6) State Store Interface
+// ============================================================================
+package com.acme.solace.obz.state;
+
+import java.util.Map;
+
+public interface LatchingStateStore {
+    
+    record State(int active, long sinceEpochSec) {}
+
+    /**
+     * Sets problem state (active=1). 
+     * Transition 0->1 sets 'since' to now; 1->1 preserves 'since'.
+     * Applies TTL if ttlSec > 0.
+     */
+    void setProblem(String metricBase, Map<String,String> labels, long nowEpochSec, long ttlSec);
+
+    /**
+     * Sets clear state (active=0) and removes any TTL.
+     */
+    void setClear(String metricBase, Map<String,String> labels, long nowEpochSec);
+
+    /**
+     * Returns snapshot of all states for metrics export.
+     */
+    Map<String, State> snapshot();
+}
+
+// ============================================================================
+// 7) Redis Latching State Store
+// ============================================================================
+package com.acme.solace.obz.state;
+
+import com.acme.solace.obz.config.EventMappingConfig;
+import com.google.common.util.concurrent.RateLimiter;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataAccessException;
+import org.springframework.data.redis.RedisConnectionFailureException;
+import org.springframework.data.redis.connection.RedisConnection;
+import org.springframework.data.redis.core.Cursor;
+import org.springframework.data.redis.core.RedisCallback;
+import org.springframework.data.redis.core.ScanOptions;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Component;
+
+import jakarta.annotation.PostConstruct;
+import java.nio.charset.StandardCharsets;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
+
+@Component
+@Slf4j
+public class RedisLatchingStateStore implements LatchingStateStore {
+
+    private final StringRedisTemplate redis;
+    private final EventMappingConfig cfg;
+    private final MeterRegistry meterRegistry;
+
+    @Value("${spring.application.name:obz}")
+    private String appName;
+
+    @Value("${HOSTNAME:unknown}")
+    private String podName;
+
+    // Rate limiting (1000 ops/sec)
+    private final RateLimiter rateLimiter = RateLimiter.create(1000.0);
+
+    // Local fallback buffer if Redis is unavailable
+    private final ConcurrentMap<String, State> localFallbackCache = new ConcurrentHashMap<>();
+
+    // Thread-safe snapshot cache
+    private final AtomicReference<CachedSnapshot> snapshotRef = 
+            new AtomicReference<>(new CachedSnapshot(Map.of(), 0));
+
+    // Metrics
+    private AtomicInteger fallbackCacheSize;
+    private Counter redisErrors;
+
+    private record CachedSnapshot(Map<String, State> data, long timestamp) {}
+
+    @Autowired
+    public RedisLatchingStateStore(StringRedisTemplate redis, 
+                                   EventMappingConfig cfg,
+                                   MeterRegistry meterRegistry) {
+        this.redis = redis;
+        this.cfg = cfg;
+        this.meterRegistry = meterRegistry;
+    }
+
+    @PostConstruct
+    public void initMetrics() {
+        fallbackCacheSize = meterRegistry.gauge("redis.fallback.cache.size", 
+                new AtomicInteger(0));
+        redisErrors = Counter.builder("redis.errors.total")
+                .register(meterRegistry);
+        
+        // Register connection pool metrics
+        Gauge.builder("redis.connections.active", redis, t -> {
+            try {
+                return redis.getConnectionFactory().getConnection().ping() != null ? 1 : 0;
+            } catch (Exception e) {
+                return 0;
+            }
+        }).register(meterRegistry);
+    }
+
+    private final DefaultRedisScript<Long> luaSetProblem = new DefaultRedisScript<>(
+            """
+            -- KEYS[1] hash key; ARGV[1]=nowSec ARGV[2]=ttlSec ARGV[3]=processing_pod
+            local a = redis.call('HGET', KEYS[1], 'active')
+            if (not a) or (a == '0') then
+              redis.call('HMSET', KEYS[1],
+                'active','1',
+                'since',ARGV[1],
+                'last_event_time',ARGV[1],
+                'event_count','1',
+                'processing_pod',ARGV[3])
+            else
+              redis.call('HINCRBY', KEYS[1], 'event_count', 1)
+              redis.call('HSET', KEYS[1], 'last_event_time', ARGV[1])
+              redis.call('HSET', KEYS[1], 'active', '1')
+              redis.call('HSET', KEYS[1], 'processing_pod', ARGV[3])
+            end
+            if tonumber(ARGV[2]) and tonumber(ARGV[2]) > 0 then
+              redis.call('EXPIRE', KEYS[1], ARGV[2])
+            end
+            return 1
+            """,
+            Long.class
+    );
+
+    private final DefaultRedisScript<Long> luaSetClear = new DefaultRedisScript<>(
+            """
+            -- KEYS[1] hash key; ARGV[1]=nowSec ARGV[2]=processing_pod
+            redis.call('HSET', KEYS[1], 'active', '0')
+            redis.call('HSET', KEYS[1], 'last_event_time', ARGV[1])
+            redis.call('HSET', KEYS[1], 'processing_pod', ARGV[2])
+            redis.call('PERSIST', KEYS[1])
+            return 1
+            """,
+            Long.class
+    );
+
+    @Override
+    public void setProblem(String metricBase, Map<String,String> labels, long nowEpochSec, long ttlSec) {
+        if (!rateLimiter.tryAcquire()) {
+            log.warn("Rate limit exceeded for setProblem");
+            return;
+        }
+
+        String key = hashKey(metricBase, labels);
+        Timer.Sample sample = Timer.start(meterRegistry);
+        
+        try {
+            redis.execute(luaSetProblem, List.of(key),
+                    String.valueOf(nowEpochSec), String.valueOf(ttlSec), processingPod());
+            sample.stop(Timer.builder("redis.operation.duration")
+                    .tag("operation", "setProblem")
+                    .tag("status", "success")
+                    .register(meterRegistry));
+        } catch (Exception e) {
+            sample.stop(Timer.builder("redis.operation.duration")
+                    .tag("operation", "setProblem")
+                    .tag("status", "failure")
+                    .register(meterRegistry));
+            redisErrors.increment();
+            log.error("Redis setProblem failed; buffering locally key={}", key, e);
+            localFallbackCache.put(key, new State(1, nowEpochSec));
+            fallbackCacheSize.set(localFallbackCache.size());
+        }
+    }
+
+    @Override
+    public void setClear(String metricBase, Map<String,String> labels, long nowEpochSec) {
+        if (!rateLimiter.tryAcquire()) {
+            log.warn("Rate limit exceeded for setClear");
+            return;
+        }
+
+        String key = hashKey(metricBase, labels);
+        Timer.Sample sample = Timer.start(meterRegistry);
+        
+        try {
+            redis.execute(luaSetClear, List.of(key),
+                    String.valueOf(nowEpochSec), processingPod());
+            sample.stop(Timer.builder("redis.operation.duration")
+                    .tag("operation", "setClear")
+                    .tag("status", "success")
+                    .register(meterRegistry));
+        } catch (Exception e) {
+            sample.stop(Timer.builder("redis.operation.duration")
+                    .tag("operation", "setClear")
+                    .tag("status", "failure")
+                    .register(meterRegistry));
+            redisErrors.increment();
+            log.error("Redis setClear failed; buffering locally key={}", key, e);
+            localFallbackCache.put(key, new State(0, nowEpochSec));
+            fallbackCacheSize.set(localFallbackCache.size());
+        }
+    }
+
+    @Scheduled(fixedDelayString = "${solace.latch.refresh-interval:5000}")
+    public void syncFallbackCache() {
+        if (localFallbackCache.isEmpty()) return;
+
+        int retryCount = 0;
+        int maxRetries = cfg.latchProps().getMaxRetries();
+        long retryDelayMs = cfg.latchProps().getRetryDelayMs();
+
+        while (!localFallbackCache.isEmpty() && retryCount < maxRetries) {
+            try {
+                // Test connection first
+                redis.opsForValue().get("ping");
+
+                Map<String, State> toSync = new HashMap<>(localFallbackCache);
+                localFallbackCache.clear();
+
+                redis.executePipelined((RedisCallback<Object>) connection -> {
+                    toSync.forEach((key, st) -> {
+                        if (st.active() == 1) {
+                            redis.execute(luaSetProblem, List.of(key),
+                                    String.valueOf(st.sinceEpochSec()), 
+                                    String.valueOf(86400), 
+                                    processingPod());
+                        } else {
+                            redis.execute(luaSetClear, List.of(key),
+                                    String.valueOf(st.sinceEpochSec()), 
+                                    processingPod());
+                        }
+                    });
+                    return null;
+                });
+
+                log.info("Successfully synced {} entries from fallback cache", toSync.size());
+                fallbackCacheSize.set(0);
+                break;
+
+            } catch (Exception e) {
+                retryCount++;
+                if (retryCount >= maxRetries) {
+                    log.error("Failed to sync fallback cache after {} retries", maxRetries, e);
+                    redisErrors.increment();
+                } else {
+                    try {
+                        Thread.sleep(retryDelayMs * retryCount); // Exponential backoff
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    @Override
+    public Map<String, State> snapshot() {
+        long cacheRetentionMs = cfg.latchProps().getCacheRetentionMs();
+        long now = System.currentTimeMillis();
+
+        CachedSnapshot current = snapshotRef.get();
+        if (current.data() != null && !current.data().isEmpty() && 
+            (now - current.timestamp()) < cacheRetentionMs) {
+            return current.data();
+        }
+
+        Timer.Sample sample = Timer.start(meterRegistry);
+        try {
+            String pattern = cfg.latchProps().getKeyspace() + ":hash:*";
+            List<String> keys = scanKeys(pattern);
+
+            if (keys.isEmpty()) {
+                Map<String, State> empty = Map.of();
+                snapshotRef.set(new CachedSnapshot(empty, now));
+                return empty;
+            }
+
+            List<Object> pipelined = redis.executePipelined((RedisCallback<Object>) connection -> {
+                for (String k : keys) {
+                    connection.hashCommands().hMGet(
+                            k.getBytes(StandardCharsets.UTF_8),
+                            "active".getBytes(StandardCharsets.UTF_8),
+                            "since".getBytes(StandardCharsets.UTF_8)
+                    );
+                }
+                return null;
+            });
+
+            Map<String, State> out = new LinkedHashMap<>(keys.size());
+            for (int i = 0; i < keys.size(); i++) {
+                @SuppressWarnings("unchecked")
+                List<byte[]> vals = (List<byte[]>) pipelined.get(i);
+                if (vals != null && vals.size() >= 2) {
+                    int active = parseInt(vals.get(0), 0);
+                    long since = parseLong(vals.get(1), 0L);
+                    out.put(keys.get(i), new State(active, since));
+                }
+            }
+
+            snapshotRef.set(new CachedSnapshot(out, now));
+            sample.stop(Timer.builder("redis.operation.duration")
+                    .tag("operation", "snapshot")
+                    .tag("status", "success")
+                    .register(meterRegistry));
+            return out;
+
+        } catch (Exception e) {
+            sample.stop(Timer.builder("redis.operation.duration")
+                    .tag("operation", "snapshot")
+                    .tag("status", "failure")
+                    .register(meterRegistry));
+            log.error("Failed to get snapshot from Redis", e);
+            redisErrors.increment();
+            // Return previous cache if available
+            return current.data() != null ? current.data() : Map.of();
+        }
+    }
+
+    private List<String> scanKeys(String pattern) {
+        List<String> keys = new ArrayList<>();
+        redis.execute((RedisCallback<Void>) (RedisConnection conn) -> {
+            Cursor<byte[]> cursor = null;
+            try {
+                cursor = conn.scan(
+                        ScanOptions.scanOptions()
+                                .match(pattern)
+                                .count(1000)
+                                .build());
+                cursor.forEachRemaining(k -> 
+                        keys.add(new String(k, StandardCharsets.UTF_8)));
+            } catch (DataAccessException e) {
+                throw e;
+            } catch (Exception e) {
+                throw new IllegalStateException("Failed to scan keys", e);
+            } finally {
+                if (cursor != null && !cursor.isClosed()) {
+                    try {
+                        cursor.close();
+                    } catch (Exception e) {
+                        log.warn("Failed to close cursor", e);
+                    }
+                }
+            }
+            return null;
+        });
+        return keys;
+    }
+
+    private int parseInt(byte[] b, int defaultValue) {
+        if (b == null || b.length == 0) return defaultValue;
+        try {
+            return Integer.parseInt(new String(b, StandardCharsets.UTF_8));
+        } catch (NumberFormatException e) {
+            return defaultValue;
+        }
+    }
+
+    private long parseLong(byte[] b, long defaultValue) {
+        if (b == null || b.length == 0) return defaultValue;
+        try {
+            return Long.parseLong(new String(b, StandardCharsets.UTF_8));
+        } catch (NumberFormatException e) {
+            return defaultValue;
+        }
+    }
+
+    private String processingPod() {
+        return appName + ":" + podName;
+    }
+
+    private String hashKey(String metricBase, Map<String,String> labels) {
+        // Validate inputs
+        if (metricBase == null || metricBase.isEmpty()) {
+            throw new IllegalArgumentException("Metric base cannot be null or empty");
+        }
+        if (metricBase.contains("|") || metricBase.contains(":")) {
+            throw new IllegalArgumentException("Invalid metric base: " + metricBase);
+        }
+
+        String keyspace = cfg.latchProps().getKeyspace();
+        return keyspace + ":hash:" + metricBase + "|" +
+                labels.entrySet().stream()
+                        .sorted(Map.Entry.comparingByKey())
+                        .filter(e -> e.getKey() != null && e.getValue() != null)
+                        .map(e -> sanitizeLabel(e.getKey()) + "=" + sanitizeLabel(e.getValue()))
+                        .collect(Collectors.joining("|"));
+    }
+
+    private String sanitizeLabel(String value) {
+        return value.trim()
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9_.-]", "_")
+                .replaceAll("_{2,}", "_");
+    }
+}
+
+// ============================================================================
+// 8) Metrics Exporter
+// ============================================================================
+package com.acme.solace.obz.metrics;
+
+import com.acme.solace.obz.config.EventMappingConfig;
+import com.acme.solace.obz.state.LatchingStateStore;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.MultiGauge;
+import io.micrometer.core.instrument.Tags;
+import io.micrometer.core.instrument.binder.MeterBinder;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Component;
+
+import java.util.ArrayList;
+import java.util.Map;
+
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class LatchingMetricsExporter implements MeterBinder {
+
+    private final LatchingStateStore store;
+    private final EventMappingConfig cfg;
+
+    private MultiGauge activeGauge;
+    private MultiGauge sinceGauge;
+
+    @Override
+    public void bindTo(MeterRegistry registry) {
+        activeGauge = MultiGauge.builder("sol_state_active")
+                .description("Active state of Solace events (1=problem, 0=clear)")
+                .register(registry);
+        sinceGauge = MultiGauge.builder("sol_state_since_unixtime")
+                .description("Unix timestamp when state changed to active")
+                .register(registry);
+        refresh();
+    }
+
+    @Scheduled(fixedDelayString = "${solace.latch.refresh-interval:5000}")
     public void refresh() {
         try {
             Map<String, LatchingStateStore.State> snap = store.snapshot();
             
-            var activeRows = new ArrayList<MultiGauge.Row<Number>>(snap.size());
-            var sinceRows = new ArrayList<MultiGauge.Row<Number>>(snap.size());
+            var activeRows = new ArrayList<MultiGauge.Row<?>>(snap.size());
+            var sinceRows = new ArrayList<MultiGauge.Row<?>>(snap.size());
 
             snap.forEach((key, st) -> {
                 Parsed parsed = parseKey(key);
@@ -23,3 +761,644 @@
             log.error("Failed to refresh metrics", e);
         }
     }
+
+    private record Parsed(Tags tags) {}
+
+    private Parsed parseKey(String redisKey) {
+        try {
+            // Format: keyspace:hash:metricBase|key=value|key=value
+            int hashIndex = redisKey.indexOf(":hash:");
+            if (hashIndex == -1) return null;
+            
+            String body = redisKey.substring(hashIndex + 6);
+            String[] parts = body.split("\\|");
+            if (parts.length < 1) return null;
+            
+            String metricBase = parts[0];
+            Tags tags = Tags.of("metric_base", metricBase);
+            
+            for (int i = 1; i < parts.length; i++) {
+                String[] kv = parts[i].split("=", 2);
+                if (kv.length == 2) {
+                    tags = tags.and(kv[0], kv[1]);
+                }
+            }
+            return new Parsed(tags);
+        } catch (Exception e) {
+            log.warn("Failed to parse key: {}", redisKey, e);
+            return null;
+        }
+    }
+}
+
+// ============================================================================
+// 9) Health Indicator
+// ============================================================================
+package com.acme.solace.obz.health;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.boot.actuate.health.Health;
+import org.springframework.boot.actuate.health.HealthIndicator;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.stereotype.Component;
+
+import java.util.concurrent.TimeUnit;
+
+@Component
+@RequiredArgsConstructor
+public class RedisHealthIndicator implements HealthIndicator {
+
+    private final StringRedisTemplate redis;
+
+    @Override
+    public Health health() {
+        long start = System.nanoTime();
+        try {
+            // Perform a simple operation to test connectivity
+            redis.opsForValue().get("health:check");
+            long latencyMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+            
+            return Health.up()
+                    .withDetail("latency_ms", latencyMs)
+                    .withDetail("status", "Redis connection healthy")
+                    .build();
+        } catch (Exception e) {
+            return Health.down(e)
+                    .withDetail("error", e.getMessage())
+                    .build();
+        }
+    }
+}
+
+// ============================================================================
+// 10) Syslog Event Processor
+// ============================================================================
+package com.acme.solace.obz.ingest;
+
+import com.acme.solace.obz.config.EventMappingConfig;
+import com.acme.solace.obz.config.EventMappingConfig.EventMapping;
+import com.acme.solace.obz.state.LatchingStateStore;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
+
+import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Stream;
+
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class SyslogEventProcessor {
+
+    private final MeterRegistry registry;
+    private final EventMappingConfig config;
+    private final LatchingStateStore store;
+
+    // Metrics
+    private final ConcurrentHashMap<String, Counter> eventCounters = new ConcurrentHashMap<>();
+    private final Counter eventsProcessed;
+    private final Counter stateTransitions;
+    private final Counter unknownEvents;
+
+    public SyslogEventProcessor(MeterRegistry registry, 
+                                EventMappingConfig config, 
+                                LatchingStateStore store) {
+        this.registry = registry;
+        this.config = config;
+        this.store = store;
+        
+        this.eventsProcessed = Counter.builder("syslog.events.processed")
+                .description("Total syslog events processed")
+                .register(registry);
+        this.stateTransitions = Counter.builder("syslog.state.transitions")
+                .description("Total state transitions")
+                .register(registry);
+        this.unknownEvents = Counter.builder("syslog.events.unknown")
+                .description("Events with no mapping")
+                .register(registry);
+    }
+
+    public void process(SyslogEvent event) {
+        if (event == null || event.getEventName() == null) {
+            log.warn("Received null or invalid event");
+            return;
+        }
+
+        Timer.Sample timerSample = Timer.start(registry);
+        String eventName = event.getEventName();
+        Map<String, String> rawLabels = sanitize(event.getLabels());
+
+        try {
+            // Always increment event counter
+            getOrCreateCounter(eventName).increment();
+
+            // Check if this is a state-tracked event
+            config.findByEvent(eventName).ifPresentOrElse(mapping -> {
+                processStatefulEvent(event, mapping, rawLabels);
+                stateTransitions.increment();
+            }, () -> {
+                log.debug("Non-latching event: {}", eventName);
+                unknownEvents.increment();
+            });
+
+            eventsProcessed.increment();
+            
+        } catch (Exception e) {
+            log.error("Error processing event: {}", eventName, e);
+            Counter.builder("syslog.events.errors")
+                    .tag("event", eventName)
+                    .register(registry)
+                    .increment();
+        } finally {
+            timerSample.stop(Timer.builder("syslog.processing.duration")
+                    .tag("event", eventName)
+                    .register(registry));
+        }
+    }
+
+    private void processStatefulEvent(SyslogEvent event, EventMapping mapping, 
+                                     Map<String, String> rawLabels) {
+        Map<String, String> labels = projectLabels(rawLabels, mapping.getLabels());
+        long now = Instant.now().getEpochSecond();
+        
+        if (config.isProblem(mapping, event.getEventName())) {
+            store.setProblem(mapping.getMetric(), labels, now, mapping.getTtl());
+            log.info("Set problem state: {} with labels: {}", 
+                    mapping.getMetric(), labels);
+        } else {
+            store.setClear(mapping.getMetric(), labels, now);
+            log.info("Cleared state: {} with labels: {}", 
+                    mapping.getMetric(), labels);
+        }
+    }
+
+    private Counter getOrCreateCounter(String eventName) {
+        return eventCounters.computeIfAbsent(eventName, name ->
+                Counter.builder("sol_event_" + name + "_total")
+                        .description("Count of " + name + " events")
+                        .register(registry)
+        );
+    }
+
+    private Map<String, String> projectLabels(Map<String, String> allLabels, 
+                                             List<String> keysToKeep) {
+        Map<String, String> projected = new LinkedHashMap<>(keysToKeep.size());
+        for (String key : keysToKeep) {
+            projected.put(key, allLabels.getOrDefault(key, "unknown"));
+        }
+        return projected;
+    }
+
+    private Map<String, String> sanitize(Map<String, String> input) {
+        if (input == null) {
+            return Map.of();
+        }
+        
+        Map<String, String> sanitized = new LinkedHashMap<>(input.size());
+        input.forEach((k, v) -> {
+            if (k != null && v != null) {
+                String sanitizedKey = sanitizeToken(k);
+                String sanitizedValue = sanitizeToken(v);
+                if (!sanitizedKey.isEmpty() && !sanitizedValue.isEmpty()) {
+                    sanitized.put(sanitizedKey, sanitizedValue);
+                }
+            }
+        });
+        return sanitized;
+    }
+
+    private String sanitizeToken(String value) {
+        return value.trim()
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9_:.-]", "_")
+                .replaceAll("_{2,}", "_")
+                .replaceAll("^_|_$", ""); // Remove leading/trailing underscores
+    }
+
+    // Syslog Event Model
+    public static class SyslogEvent {
+        private final String eventName;
+        private final Map<String, String> labels;
+        private final long timestamp;
+
+        public SyslogEvent(String eventName, Map<String, String> labels) {
+            this.eventName = eventName;
+            this.labels = labels != null ? labels : Map.of();
+            this.timestamp = System.currentTimeMillis();
+        }
+
+        public String getEventName() { return eventName; }
+        public Map<String, String> getLabels() { return labels; }
+        public long getTimestamp() { return timestamp; }
+    }
+}
+
+// ============================================================================
+// 11) Syslog TCP Receiver (Example)
+// ============================================================================
+package com.acme.solace.obz.ingest;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.net.SocketTimeoutException;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class SyslogTcpReceiver {
+
+    @Value("${syslog.port:5141}")
+    private int syslogPort;
+
+    @Value("${syslog.enabled:true}")
+    private boolean enabled;
+
+    private final SyslogEventProcessor eventProcessor;
+    private ServerSocket serverSocket;
+    private ExecutorService executorService;
+    private volatile boolean running = false;
+
+    // Pattern for parsing syslog messages (adjust based on your format)
+    private static final Pattern SYSLOG_PATTERN = Pattern.compile(
+            "<\\d+>\\S+ \\S+ \\S+ \\[([^\\]]+)\\] (.+)"
+    );
+
+    @PostConstruct
+    public void start() {
+        if (!enabled) {
+            log.info("Syslog receiver is disabled");
+            return;
+        }
+
+        try {
+            serverSocket = new ServerSocket(syslogPort);
+            serverSocket.setSoTimeout(5000); // 5 second timeout for accept()
+            executorService = Executors.newCachedThreadPool(r -> {
+                Thread t = new Thread(r, "syslog-handler");
+                t.setDaemon(true);
+                return t;
+            });
+            running = true;
+
+            // Start accepting connections
+            executorService.submit(this::acceptConnections);
+            log.info("Syslog TCP receiver started on port {}", syslogPort);
+            
+        } catch (IOException e) {
+            log.error("Failed to start syslog receiver", e);
+        }
+    }
+
+    private void acceptConnections() {
+        while (running && !serverSocket.isClosed()) {
+            try {
+                Socket clientSocket = serverSocket.accept();
+                log.info("New syslog connection from: {}", 
+                        clientSocket.getInetAddress());
+                executorService.submit(() -> handleConnection(clientSocket));
+            } catch (SocketTimeoutException e) {
+                // Expected - allows checking running flag
+            } catch (IOException e) {
+                if (running) {
+                    log.error("Error accepting connection", e);
+                }
+            }
+        }
+    }
+
+    private void handleConnection(Socket socket) {
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(socket.getInputStream()))) {
+            
+            String line;
+            while ((line = reader.readLine()) != null && running) {
+                try {
+                    SyslogEventProcessor.SyslogEvent event = parseSyslogLine(line);
+                    if (event != null) {
+                        eventProcessor.process(event);
+                    }
+                } catch (Exception e) {
+                    log.error("Error processing syslog line: {}", line, e);
+                }
+            }
+        } catch (IOException e) {
+            log.debug("Connection closed: {}", e.getMessage());
+        } finally {
+            try {
+                socket.close();
+            } catch (IOException e) {
+                log.debug("Error closing socket", e);
+            }
+        }
+    }
+
+    private SyslogEventProcessor.SyslogEvent parseSyslogLine(String line) {
+        // Example parsing - adjust based on your Solace syslog format
+        // Format: <priority>timestamp hostname tag[pid]: EVENT_NAME key1=value1 key2=value2
+        
+        try {
+            Matcher matcher = SYSLOG_PATTERN.matcher(line);
+            if (!matcher.find()) {
+                log.debug("Cannot parse syslog line: {}", line);
+                return null;
+            }
+
+            String content = matcher.group(2);
+            String[] parts = content.split("\\s+", 2);
+            if (parts.length < 1) {
+                return null;
+            }
+
+            String eventName = parts[0];
+            Map<String, String> labels = new HashMap<>();
+            
+            // Parse key=value pairs
+            if (parts.length > 1) {
+                String[] kvPairs = parts[1].split("\\s+");
+                for (String kvPair : kvPairs) {
+                    String[] kv = kvPair.split("=", 2);
+                    if (kv.length == 2) {
+                        labels.put(kv[0], kv[1]);
+                    }
+                }
+            }
+
+            // Add common labels
+            labels.put("host", "solace-broker");
+            
+            return new SyslogEventProcessor.SyslogEvent(eventName, labels);
+            
+        } catch (Exception e) {
+            log.warn("Failed to parse syslog line: {}", line, e);
+            return null;
+        }
+    }
+
+    @PreDestroy
+    public void stop() {
+        log.info("Stopping syslog receiver");
+        running = false;
+        
+        if (serverSocket != null && !serverSocket.isClosed()) {
+            try {
+                serverSocket.close();
+            } catch (IOException e) {
+                log.error("Error closing server socket", e);
+            }
+        }
+        
+        if (executorService != null) {
+            executorService.shutdown();
+            try {
+                if (!executorService.awaitTermination(10, TimeUnit.SECONDS)) {
+                    executorService.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                executorService.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+}
+
+// ============================================================================
+// 12) Kubernetes Deployment Files
+// ============================================================================
+
+/*
+--- redis-deployment.yaml ---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+spec:
+  ports:
+  - port: 6379
+    targetPort: 6379
+  selector:
+    app: redis
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+spec:
+  serviceName: redis
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        ports:
+        - containerPort: 6379
+        volumeMounts:
+        - name: redis-storage
+          mountPath: /data
+        command: ["redis-server"]
+        args: ["--appendonly", "yes"]
+  volumeClaimTemplates:
+  - metadata:
+      name: redis-storage
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 1Gi
+
+--- solace-processor-deployment.yaml ---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: solace-processor-config
+data:
+  application.yml: |
+    spring:
+      redis:
+        host: redis
+        port: 6379
+    solace:
+      latch:
+        keyspace: "solace:latch"
+        refresh-interval: 5000
+      event-mappings:
+        - problem: SYSTEM_HA_REDUN_GROUP_NODE_LEFT
+          clear: SYSTEM_HA_REDUN_GROUP_NODE_JOINED
+          metric: sol_state_ha_redundancy_group_node
+          ttl: 86400
+          labels: [vpn, host, node_name]
+        - problem: VPN_AD_MSG_SPOOL_HIGH
+          clear: VPN_AD_MSG_SPOOL_HIGH_CLEAR
+          metric: sol_state_vpn_msg_spool_threshold
+          ttl: 7200
+          labels: [vpn, host]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: solace-processor-syslog
+spec:
+  type: LoadBalancer
+  ports:
+  - name: syslog
+    port: 5141
+    protocol: TCP
+    targetPort: 5141
+  selector:
+    app: solace-processor
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: solace-processor-metrics
+  labels:
+    app: solace-processor
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+  - name: metrics
+    port: 8080
+    targetPort: 8080
+  selector:
+    app: solace-processor
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: solace-processor
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: solace-processor
+  template:
+    metadata:
+      labels:
+        app: solace-processor
+    spec:
+      containers:
+      - name: processor
+        image: your-registry/solace-processor:latest
+        ports:
+        - containerPort: 5141
+          name: syslog
+        - containerPort: 8080
+          name: metrics
+        env:
+        - name: REDIS_HOST
+          value: redis
+        - name: HOSTNAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        volumeMounts:
+        - name: config
+          mountPath: /config
+        args:
+        - "--spring.config.import=file:/config/application.yml"
+        livenessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 20
+          periodSeconds: 5
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+      volumes:
+      - name: config
+        configMap:
+          name: solace-processor-config
+
+--- prometheus-servicemonitor.yaml ---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: solace-processor
+  labels:
+    app: solace-processor
+spec:
+  selector:
+    matchLabels:
+      app: solace-processor
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /actuator/prometheus
+*/
+
+// ============================================================================
+// 13) Grafana Alert Queries
+// ============================================================================
+
+/*
+Grafana Alert Examples:
+
+1. HA Node Down:
+max without (instance, pod) (
+  sol_state_active{metric_base="sol_state_ha_redundancy_group_node"}
+) == 1
+
+2. Message Spool High:
+max without (instance, pod) (
+  sol_state_active{metric_base="sol_state_vpn_msg_spool_threshold"}
+) == 1
+
+3. Duration in Problem State:
+time() - max without (instance, pod) (
+  sol_state_since_unixtime{metric_base="sol_state_ha_redundancy_group_node"}
+) > 3600
+
+4. Event Rate Alert:
+sum by (vpn, host) (
+  increase(sol_event_VPN_AD_MSG_SPOOL_HIGH_total[5m])
+) > 5
+
+5. Processing Health:
+rate(syslog_events_processed[5m]) < 1
+
+6. Redis Health:
+redis_fallback_cache_size > 100
+*/
