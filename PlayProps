@@ -1,21 +1,48 @@
-# solace-event-mappings.yml  (mount at /config/solace-event-mappings.yml)
-solace:
-  latch:
-    keyspace: solace:latch
-    refresh-interval: 5000   # ms for exporter refresh + snapshot cache TTL
-  event-mappings:
-    - problem: SYSTEM_HA_REDUN_GROUP_NODE_LEFT
-      clear:   SYSTEM_HA_REDUN_GROUP_NODE_JOINED
-      metric:  sol_state_ha_redundancy_group_node
-      ttl:     86400           # 24h
-      labels:  [vpn, host, group]
-    - problem: VPN_AD_MSG_SPOOL_HIGH
-      clear:   VPN_AD_MSG_SPOOL_HIGH_CLEAR
-      metric:  sol_state_vpn_msg_spool_threshold
-      ttl:     7200            # 2h
-      labels:  [vpn, host]
-    - problem: CLIENT_CLIENT_CONNECT_FAIL
-      clear:   CLIENT_CLIENT_CONNECT
-      metric:  sol_state_client_connection
-      ttl:     3600
-      labels:  [vpn, host, client_username]
+// EventMappingConfig.java
+@Configuration
+@EnableConfigurationProperties
+@ConfigurationProperties(prefix = "solace")
+@Validated
+public class EventMappingConfig {
+  @Valid @NotEmpty
+  private List<EventMapping> eventMappings = new ArrayList<>();
+  @Valid @NotNull
+  private LatchProps latch = new LatchProps();
+
+  @Data public static class LatchProps {
+    @NotBlank private String keyspace = "solace:latch";
+    @Min(1000) private long refreshInterval = 5000; // ms
+  }
+
+  @Data public static class EventMapping {
+    @NotBlank private String problem;
+    @NotBlank private String clear;
+    @NotBlank private String metric;
+    @Min(0) private long ttl = 0;             // seconds; 0 disables TTL
+    @NotEmpty private List<@NotBlank String> labels;
+  }
+
+  public Optional<EventMapping> findByEvent(String eventName) {
+    return eventMappings.stream()
+        .filter(m -> m.getProblem().equals(eventName) || m.getClear().equals(eventName))
+        .findFirst();
+  }
+
+  public boolean isProblem(EventMapping m, String eventName) {
+    return m.getProblem().equals(eventName);
+  }
+
+  public List<EventMapping> all() { return eventMappings; }
+  public LatchProps latchProps() { return latch; }
+
+  @PostConstruct
+  void validateNoDuplicates() {
+    var seen = new HashSet<String>();
+    for (var m : eventMappings) {
+      if (!seen.add(m.getProblem()))
+        throw new IllegalStateException("Duplicate problem event: " + m.getProblem());
+      if (!seen.add(m.getClear()))
+        throw new IllegalStateException("Duplicate clear event: " + m.getClear());
+    }
+  }
+}
