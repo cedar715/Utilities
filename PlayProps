@@ -1,35 +1,142 @@
-package com.acme.solace.obz;
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: solace-event-pairs
+data:
+  solace-event-pairs.yml: |
+    pairs:
+      # ===== Core platform health =====
+      - kind: CFGSYNC
+        raise: SYSTEM_CFGSYNC_DOWN
+        clear: SYSTEM_CFGSYNC_UP
+        metricBase: sol_state_cfgsync
+        labels: [vpn, host]
 
-public enum ProblemKind {
-  // High-level system / infra
-  CFGSYNC,                   // SYSTEM_CFGSYNC_DOWN / _UP
-  HA_NODE,                   // SYSTEM_HA_REDUN_GROUP_NODE_LEFT / _JOINED
-  HA_REDUNDANCY,             // SYSTEM_HA_REDUN_STATE_DOWN / _UP
-  HA_VRRP,                   // SYSTEM_HA_VRRP_STATE_DOWN / _UP
-  CLUSTER_LINK,              // SYSTEM_CLUSTERING_LINK_DOWN / _UP
-  DNS_SERVER,                // SYSTEM_DNS_NAME_SERVER_DOWN / _UP
-  NTP_SERVER,                // SYSTEM_NTP_SERVER_DOWN / _UP
-  PTP_SYNC,                  // SYSTEM_PTP_SYNC_DOWN / _UP
-  ETH_LINK,                  // SYSTEM_LINK_ETH_LINK_DOWN / _UP
-  ADB_LINK,                  // SYSTEM_LINK_ADB_LINK_DOWN / _UP
-  DISK_ARRAY_PATH,           // SYSTEM_LINK_PATH_TO_DISK_ARRAY_DOWN / _UP
+      - kind: HA_NODE
+        raise: SYSTEM_HA_REDUN_GROUP_NODE_LEFT
+        clear: SYSTEM_HA_REDUN_GROUP_NODE_JOINED
+        metricBase: sol_state_ha_node
+        labels: [vpn, host, group]
 
-  // Routing
-  ROUTING_CSPF_CONN,         // SYSTEM_ROUTING_CSPF_CONN_DOWN / _UP
+      - kind: HA_REDUNDANCY
+        raise: SYSTEM_HA_REDUN_STATE_DOWN
+        clear: SYSTEM_HA_REDUN_STATE_UP
+        metricBase: sol_state_ha_redundancy
+        labels: [vpn, host]
 
-  // HA VR role changes are informational; not paired here
+      - kind: HA_VRRP
+        raise: SYSTEM_HA_VRRP_STATE_DOWN
+        clear: SYSTEM_HA_VRRP_STATE_UP
+        metricBase: sol_state_ha_vrrp
+        labels: [vpn, host, interface]
 
-  // Capacity / thresholds (SYSTEM level)
-  SYS_MSG_SPOOL,             // SYSTEM_AD_MSG_SPOOL_HIGH / _HIGH_CLEAR
-  SYS_FAN,                   // SYSTEM_CHASSIS_FAN_HIGH / _HIGH_CLEAR
-  SYS_TEMP_HIGH,             // SYSTEM_CHASSIS_TEMPERATURE_HIGH / _HIGH_CLEAR
-  SYS_DISK_UTIL,             // SYSTEM_CHASSIS_DISK_UTILIZATION_HIGH / _HIGH_CLEAR
-  SYS_STORAGE_ELEM_USAGE,    // SYSTEM_CHASSIS_STORAGE_ELEMENT_USAGE_HIGH / _HIGH_CLEAR
-  SSL_CONNECTIONS,           // SYSTEM_SSL_CONNECTIONS_HIGH / _HIGH_CLEAR
+      - kind: CLUSTER_LINK
+        raise: SYSTEM_CLUSTERING_LINK_DOWN
+        clear: SYSTEM_CLUSTERING_LINK_UP
+        metricBase: sol_state_cluster_link
+        labels: [vpn, host, link]
 
-  // VPN-level thresholds
-  VPN_MSG_SPOOL,             // VPN_AD_MSG_SPOOL_HIGH / _HIGH_CLEAR
-  VPN_EGRESS_FLOWS,          // VPN_AD_EGRESS_FLOWS_HIGH / _HIGH_CLEAR
-  VPN_INGRESS_FLOWS,         // VPN_AD_INGRESS_FLOWS_HIGH / _HIGH_CLEAR
-  VPN_ENDPOINTS              // VPN_AD_ENDPOINTS_HIGH / _HIGH_CLEAR
-}
+      - kind: DNS_SERVER
+        raise: SYSTEM_DNS_NAME_SERVER_DOWN
+        clear: SYSTEM_DNS_NAME_SERVER_UP
+        metricBase: sol_state_dns_server
+        labels: [host, server]
+
+      - kind: NTP_SERVER
+        raise: SYSTEM_NTP_SERVER_DOWN
+        clear: SYSTEM_NTP_SERVER_UP
+        metricBase: sol_state_ntp_server
+        labels: [host, server]
+
+      - kind: PTP_SYNC
+        raise: SYSTEM_PTP_SYNC_DOWN
+        clear: SYSTEM_PTP_SYNC_UP
+        metricBase: sol_state_ptp_sync
+        labels: [host, ptp_domain]
+
+      - kind: ETH_LINK
+        raise: SYSTEM_LINK_ETH_LINK_DOWN
+        clear: SYSTEM_LINK_ETH_LINK_UP
+        metricBase: sol_state_eth_link
+        labels: [host, interface]
+
+      - kind: ADB_LINK
+        raise: SYSTEM_LINK_ADB_LINK_DOWN
+        clear: SYSTEM_LINK_ADB_LINK_UP
+        metricBase: sol_state_adb_link
+        labels: [host, link]
+
+      - kind: DISK_ARRAY_PATH
+        raise: SYSTEM_LINK_PATH_TO_DISK_ARRAY_DOWN
+        clear: SYSTEM_LINK_PATH_TO_DISK_ARRAY_UP
+        metricBase: sol_state_disk_array_path
+        labels: [host, path]
+
+      # ===== Routing =====
+      - kind: ROUTING_CSPF_CONN
+        raise: SYSTEM_ROUTING_CSPF_CONN_DOWN
+        clear: SYSTEM_ROUTING_CSPF_CONN_UP
+        metricBase: sol_state_routing_cspf_conn
+        labels: [host, neighbor]
+
+      # ===== System thresholds =====
+      - kind: SYS_MSG_SPOOL
+        raise: SYSTEM_AD_MSG_SPOOL_HIGH
+        clear: SYSTEM_AD_MSG_SPOOL_HIGH_CLEAR
+        metricBase: sol_state_sys_msg_spool
+        labels: [host]
+
+      - kind: SYS_FAN
+        raise: SYSTEM_CHASSIS_FAN_HIGH
+        clear: SYSTEM_CHASSIS_FAN_HIGH_CLEAR
+        metricBase: sol_state_sys_fan
+        labels: [host, sensor]
+
+      - kind: SYS_TEMP_HIGH
+        raise: SYSTEM_CHASSIS_TEMPERATURE_HIGH
+        clear: SYSTEM_CHASSIS_TEMPERATURE_HIGH_CLEAR
+        metricBase: sol_state_sys_temp
+        labels: [host, sensor]
+
+      - kind: SYS_DISK_UTIL
+        raise: SYSTEM_CHASSIS_DISK_UTILIZATION_HIGH
+        clear: SYSTEM_CHASSIS_DISK_UTILIZATION_HIGH_CLEAR
+        metricBase: sol_state_sys_disk_util
+        labels: [host, disk]
+
+      - kind: SYS_STORAGE_ELEM_USAGE
+        raise: SYSTEM_CHASSIS_STORAGE_ELEMENT_USAGE_HIGH
+        clear: SYSTEM_CHASSIS_STORAGE_ELEMENT_USAGE_HIGH_CLEAR
+        metricBase: sol_state_sys_storage_elem
+        labels: [host, element]
+
+      - kind: SSL_CONNECTIONS
+        raise: SYSTEM_SSL_CONNECTIONS_HIGH
+        clear: SYSTEM_SSL_CONNECTIONS_HIGH_CLEAR
+        metricBase: sol_state_ssl_connections
+        labels: [host]
+
+      # ===== VPN thresholds =====
+      - kind: VPN_MSG_SPOOL
+        raise: VPN_AD_MSG_SPOOL_HIGH
+        clear: VPN_AD_MSG_SPOOL_HIGH_CLEAR
+        metricBase: sol_state_vpn_msg_spool
+        labels: [vpn, host]
+
+      - kind: VPN_EGRESS_FLOWS
+        raise: VPN_AD_EGRESS_FLOWS_HIGH
+        clear: VPN_AD_EGRESS_FLOWS_HIGH_CLEAR
+        metricBase: sol_state_vpn_egress_flows
+        labels: [vpn, host]
+
+      - kind: VPN_INGRESS_FLOWS
+        raise: VPN_AD_INGRESS_FLOWS_HIGH
+        clear: VPN_AD_INGRESS_FLOWS_HIGH_CLEAR
+        metricBase: sol_state_vpn_ingress_flows
+        labels: [vpn, host]
+
+      - kind: VPN_ENDPOINTS
+        raise: VPN_AD_ENDPOINTS_HIGH
+        clear: VPN_AD_ENDPOINTS_HIGH_CLEAR
+        metricBase: sol_state_vpn_endpoints
+        labels: [vpn, host]
