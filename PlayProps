@@ -1,89 +1,40 @@
-package com.acme.solace.obz.config;
+// build.gradle.kts
 
-import jakarta.annotation.PostConstruct;
-import jakarta.validation.Valid;
-import jakarta.validation.constraints.Min;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotEmpty;
-import jakarta.validation.constraints.NotNull;
-
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Optional;
-
-import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.validation.annotation.Validated;
-
-@Configuration
-@ConfigurationProperties(prefix = "solace")
-@Validated
-public class EventMappingConfig {
-
-  @Valid @NotEmpty
-  private List<EventMapping> eventMappings = new ArrayList<>();
-
-  @Valid @NotNull
-  private LatchProps latch = new LatchProps();
-
-  public static class LatchProps {
-    @NotBlank
-    private String keyspace = "solace:latch";
-    @Min(1000)
-    private long refreshInterval = 5000; // ms
-
-    public String getKeyspace() { return keyspace; }
-    public void setKeyspace(String keyspace) { this.keyspace = keyspace; }
-    public long getRefreshInterval() { return refreshInterval; }
-    public void setRefreshInterval(long refreshInterval) { this.refreshInterval = refreshInterval; }
-  }
-
-  public static class EventMapping {
-    @NotBlank private String problem;
-    @NotBlank private String clear;
-    @NotBlank private String metric;
-    @Min(0)   private long ttl = 0;                 // seconds; 0 disables TTL
-    @NotEmpty private List<@NotBlank String> labels;
-
-    public String getProblem() { return problem; }
-    public void setProblem(String problem) { this.problem = problem; }
-    public String getClear() { return clear; }
-    public void setClear(String clear) { this.clear = clear; }
-    public String getMetric() { return metric; }
-    public void setMetric(String metric) { this.metric = metric; }
-    public long getTtl() { return ttl; }
-    public void setTtl(long ttl) { this.ttl = ttl; }
-    public List<String> getLabels() { return labels; }
-    public void setLabels(List<String> labels) { this.labels = labels; }
-  }
-
-  public Optional<EventMapping> findByEvent(String eventName) {
-    return eventMappings.stream()
-        .filter(m -> m.getProblem().equals(eventName) || m.getClear().equals(eventName))
-        .findFirst();
-  }
-
-  public boolean isProblem(EventMapping m, String eventName) {
-    return m.getProblem().equals(eventName);
-  }
-
-  public List<EventMapping> all() { return eventMappings; }
-  public LatchProps latchProps() { return latch; }
-
-  @PostConstruct
-  void validateNoDuplicates() {
-    var seen = new HashSet<String>();
-    for (var m : eventMappings) {
-      if (!seen.add(m.getProblem()))
-        throw new IllegalStateException("Duplicate problem event: " + m.getProblem());
-      if (!seen.add(m.getClear()))
-        throw new IllegalStateException("Duplicate clear event: " + m.getClear());
-    }
-  }
-
-  public List<EventMapping> getEventMappings() { return eventMappings; }
-  public void setEventMappings(List<EventMapping> eventMappings) { this.eventMappings = eventMappings; }
-  public LatchProps getLatch() { return latch; }
-  public void setLatch(LatchProps latch) { this.latch = latch; }
+plugins {
+    id("java")
+    id("org.springframework.boot") version "3.3.3"
+    id("io.spring.dependency-management") version "1.1.6"
 }
+
+java {
+    toolchain {
+        languageVersion.set(JavaLanguageVersion.of(17))
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // --- Spring Boot starters ---
+    implementation("org.springframework.boot:spring-boot-starter")                 // core + scheduling, etc.
+    implementation("org.springframework.boot:spring-boot-starter-actuator")        // /actuator + health
+    implementation("org.springframework.boot:spring-boot-starter-data-redis")      // Redis (Lettuce)
+    implementation("io.micrometer:micrometer-registry-prometheus")                 // Prometheus metrics
+
+    // ✅ Recommended: Jakarta Bean Validation for config validation
+    implementation("org.springframework.boot:spring-boot-starter-validation")
+
+    // Optional helpers
+    compileOnly("org.projectlombok:lombok")
+    annotationProcessor("org.projectlombok:lombok")
+
+    // For @ConfigurationProperties metadata (nice dev UX)
+    annotationProcessor("org.springframework.boot:spring-boot-configuration-processor")
+
+    testImplementation("org.springframework.boot:spring-boot-starter-test")
+}
+
+// If you don’t want Jakarta validation, just remove this line above:
+// implementation("org.springframework.boot:spring-boot-starter-validation")
