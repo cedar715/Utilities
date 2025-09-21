@@ -804,4 +804,585 @@ public class RedisHealthIndicator implements HealthIndicator {
             
             return Health.up()
                     .withDetail("latency_ms", latencyMs)
-                    .with
+                    .withDetail("status", "Redis connection healthy")
+                    .build();
+        } catch (Exception e) {
+            return Health.down(e)
+                    .withDetail("error", e.getMessage())
+                    .build();
+        }
+    }
+}
+
+// ============================================================================
+// 10) Syslog Event Processor
+// ============================================================================
+package com.acme.solace.obz.ingest;
+
+import com.acme.solace.obz.config.EventMappingConfig;
+import com.acme.solace.obz.config.EventMappingConfig.EventMapping;
+import com.acme.solace.obz.state.LatchingStateStore;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
+
+import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Stream;
+
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class SyslogEventProcessor {
+
+    private final MeterRegistry registry;
+    private final EventMappingConfig config;
+    private final LatchingStateStore store;
+
+    // Metrics
+    private final ConcurrentHashMap<String, Counter> eventCounters = new ConcurrentHashMap<>();
+    private final Counter eventsProcessed;
+    private final Counter stateTransitions;
+    private final Counter unknownEvents;
+
+    public SyslogEventProcessor(MeterRegistry registry, 
+                                EventMappingConfig config, 
+                                LatchingStateStore store) {
+        this.registry = registry;
+        this.config = config;
+        this.store = store;
+        
+        this.eventsProcessed = Counter.builder("syslog.events.processed")
+                .description("Total syslog events processed")
+                .register(registry);
+        this.stateTransitions = Counter.builder("syslog.state.transitions")
+                .description("Total state transitions")
+                .register(registry);
+        this.unknownEvents = Counter.builder("syslog.events.unknown")
+                .description("Events with no mapping")
+                .register(registry);
+    }
+
+    public void process(SyslogEvent event) {
+        if (event == null || event.getEventName() == null) {
+            log.warn("Received null or invalid event");
+            return;
+        }
+
+        Timer.Sample timerSample = Timer.start(registry);
+        String eventName = event.getEventName();
+        Map<String, String> rawLabels = sanitize(event.getLabels());
+
+        try {
+            // Always increment event counter
+            getOrCreateCounter(eventName).increment();
+
+            // Check if this is a state-tracked event
+            config.findByEvent(eventName).ifPresentOrElse(mapping -> {
+                processStatefulEvent(event, mapping, rawLabels);
+                stateTransitions.increment();
+            }, () -> {
+                log.debug("Non-latching event: {}", eventName);
+                unknownEvents.increment();
+            });
+
+            eventsProcessed.increment();
+            
+        } catch (Exception e) {
+            log.error("Error processing event: {}", eventName, e);
+            Counter.builder("syslog.events.errors")
+                    .tag("event", eventName)
+                    .register(registry)
+                    .increment();
+        } finally {
+            timerSample.stop(Timer.builder("syslog.processing.duration")
+                    .tag("event", eventName)
+                    .register(registry));
+        }
+    }
+
+    private void processStatefulEvent(SyslogEvent event, EventMapping mapping, 
+                                     Map<String, String> rawLabels) {
+        Map<String, String> labels = projectLabels(rawLabels, mapping.getLabels());
+        long now = Instant.now().getEpochSecond();
+        
+        if (config.isProblem(mapping, event.getEventName())) {
+            store.setProblem(mapping.getMetric(), labels, now, mapping.getTtl());
+            log.info("Set problem state: {} with labels: {}", 
+                    mapping.getMetric(), labels);
+        } else {
+            store.setClear(mapping.getMetric(), labels, now);
+            log.info("Cleared state: {} with labels: {}", 
+                    mapping.getMetric(), labels);
+        }
+    }
+
+    private Counter getOrCreateCounter(String eventName) {
+        return eventCounters.computeIfAbsent(eventName, name ->
+                Counter.builder("sol_event_" + name + "_total")
+                        .description("Count of " + name + " events")
+                        .register(registry)
+        );
+    }
+
+    private Map<String, String> projectLabels(Map<String, String> allLabels, 
+                                             List<String> keysToKeep) {
+        Map<String, String> projected = new LinkedHashMap<>(keysToKeep.size());
+        for (String key : keysToKeep) {
+            projected.put(key, allLabels.getOrDefault(key, "unknown"));
+        }
+        return projected;
+    }
+
+    private Map<String, String> sanitize(Map<String, String> input) {
+        if (input == null) {
+            return Map.of();
+        }
+        
+        Map<String, String> sanitized = new LinkedHashMap<>(input.size());
+        input.forEach((k, v) -> {
+            if (k != null && v != null) {
+                String sanitizedKey = sanitizeToken(k);
+                String sanitizedValue = sanitizeToken(v);
+                if (!sanitizedKey.isEmpty() && !sanitizedValue.isEmpty()) {
+                    sanitized.put(sanitizedKey, sanitizedValue);
+                }
+            }
+        });
+        return sanitized;
+    }
+
+    private String sanitizeToken(String value) {
+        return value.trim()
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9_:.-]", "_")
+                .replaceAll("_{2,}", "_")
+                .replaceAll("^_|_$", ""); // Remove leading/trailing underscores
+    }
+
+    // Syslog Event Model
+    public static class SyslogEvent {
+        private final String eventName;
+        private final Map<String, String> labels;
+        private final long timestamp;
+
+        public SyslogEvent(String eventName, Map<String, String> labels) {
+            this.eventName = eventName;
+            this.labels = labels != null ? labels : Map.of();
+            this.timestamp = System.currentTimeMillis();
+        }
+
+        public String getEventName() { return eventName; }
+        public Map<String, String> getLabels() { return labels; }
+        public long getTimestamp() { return timestamp; }
+    }
+}
+
+// ============================================================================
+// 11) Syslog TCP Receiver (Example)
+// ============================================================================
+package com.acme.solace.obz.ingest;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.net.SocketTimeoutException;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+@Component
+@RequiredArgsConstructor
+@Slf4j
+public class SyslogTcpReceiver {
+
+    @Value("${syslog.port:5141}")
+    private int syslogPort;
+
+    @Value("${syslog.enabled:true}")
+    private boolean enabled;
+
+    private final SyslogEventProcessor eventProcessor;
+    private ServerSocket serverSocket;
+    private ExecutorService executorService;
+    private volatile boolean running = false;
+
+    // Pattern for parsing syslog messages (adjust based on your format)
+    private static final Pattern SYSLOG_PATTERN = Pattern.compile(
+            "<\\d+>\\S+ \\S+ \\S+ \\[([^\\]]+)\\] (.+)"
+    );
+
+    @PostConstruct
+    public void start() {
+        if (!enabled) {
+            log.info("Syslog receiver is disabled");
+            return;
+        }
+
+        try {
+            serverSocket = new ServerSocket(syslogPort);
+            serverSocket.setSoTimeout(5000); // 5 second timeout for accept()
+            executorService = Executors.newCachedThreadPool(r -> {
+                Thread t = new Thread(r, "syslog-handler");
+                t.setDaemon(true);
+                return t;
+            });
+            running = true;
+
+            // Start accepting connections
+            executorService.submit(this::acceptConnections);
+            log.info("Syslog TCP receiver started on port {}", syslogPort);
+            
+        } catch (IOException e) {
+            log.error("Failed to start syslog receiver", e);
+        }
+    }
+
+    private void acceptConnections() {
+        while (running && !serverSocket.isClosed()) {
+            try {
+                Socket clientSocket = serverSocket.accept();
+                log.info("New syslog connection from: {}", 
+                        clientSocket.getInetAddress());
+                executorService.submit(() -> handleConnection(clientSocket));
+            } catch (SocketTimeoutException e) {
+                // Expected - allows checking running flag
+            } catch (IOException e) {
+                if (running) {
+                    log.error("Error accepting connection", e);
+                }
+            }
+        }
+    }
+
+    private void handleConnection(Socket socket) {
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(socket.getInputStream()))) {
+            
+            String line;
+            while ((line = reader.readLine()) != null && running) {
+                try {
+                    SyslogEventProcessor.SyslogEvent event = parseSyslogLine(line);
+                    if (event != null) {
+                        eventProcessor.process(event);
+                    }
+                } catch (Exception e) {
+                    log.error("Error processing syslog line: {}", line, e);
+                }
+            }
+        } catch (IOException e) {
+            log.debug("Connection closed: {}", e.getMessage());
+        } finally {
+            try {
+                socket.close();
+            } catch (IOException e) {
+                log.debug("Error closing socket", e);
+            }
+        }
+    }
+
+    private SyslogEventProcessor.SyslogEvent parseSyslogLine(String line) {
+        // Example parsing - adjust based on your Solace syslog format
+        // Format: <priority>timestamp hostname tag[pid]: EVENT_NAME key1=value1 key2=value2
+        
+        try {
+            Matcher matcher = SYSLOG_PATTERN.matcher(line);
+            if (!matcher.find()) {
+                log.debug("Cannot parse syslog line: {}", line);
+                return null;
+            }
+
+            String content = matcher.group(2);
+            String[] parts = content.split("\\s+", 2);
+            if (parts.length < 1) {
+                return null;
+            }
+
+            String eventName = parts[0];
+            Map<String, String> labels = new HashMap<>();
+            
+            // Parse key=value pairs
+            if (parts.length > 1) {
+                String[] kvPairs = parts[1].split("\\s+");
+                for (String kvPair : kvPairs) {
+                    String[] kv = kvPair.split("=", 2);
+                    if (kv.length == 2) {
+                        labels.put(kv[0], kv[1]);
+                    }
+                }
+            }
+
+            // Add common labels
+            labels.put("host", "solace-broker");
+            
+            return new SyslogEventProcessor.SyslogEvent(eventName, labels);
+            
+        } catch (Exception e) {
+            log.warn("Failed to parse syslog line: {}", line, e);
+            return null;
+        }
+    }
+
+    @PreDestroy
+    public void stop() {
+        log.info("Stopping syslog receiver");
+        running = false;
+        
+        if (serverSocket != null && !serverSocket.isClosed()) {
+            try {
+                serverSocket.close();
+            } catch (IOException e) {
+                log.error("Error closing server socket", e);
+            }
+        }
+        
+        if (executorService != null) {
+            executorService.shutdown();
+            try {
+                if (!executorService.awaitTermination(10, TimeUnit.SECONDS)) {
+                    executorService.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                executorService.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+}
+
+// ============================================================================
+// 12) Kubernetes Deployment Files
+// ============================================================================
+
+/*
+--- redis-deployment.yaml ---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+spec:
+  ports:
+  - port: 6379
+    targetPort: 6379
+  selector:
+    app: redis
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+spec:
+  serviceName: redis
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        ports:
+        - containerPort: 6379
+        volumeMounts:
+        - name: redis-storage
+          mountPath: /data
+        command: ["redis-server"]
+        args: ["--appendonly", "yes"]
+  volumeClaimTemplates:
+  - metadata:
+      name: redis-storage
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      resources:
+        requests:
+          storage: 1Gi
+
+--- solace-processor-deployment.yaml ---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: solace-processor-config
+data:
+  application.yml: |
+    spring:
+      redis:
+        host: redis
+        port: 6379
+    solace:
+      latch:
+        keyspace: "solace:latch"
+        refresh-interval: 5000
+      event-mappings:
+        - problem: SYSTEM_HA_REDUN_GROUP_NODE_LEFT
+          clear: SYSTEM_HA_REDUN_GROUP_NODE_JOINED
+          metric: sol_state_ha_redundancy_group_node
+          ttl: 86400
+          labels: [vpn, host, node_name]
+        - problem: VPN_AD_MSG_SPOOL_HIGH
+          clear: VPN_AD_MSG_SPOOL_HIGH_CLEAR
+          metric: sol_state_vpn_msg_spool_threshold
+          ttl: 7200
+          labels: [vpn, host]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: solace-processor-syslog
+spec:
+  type: LoadBalancer
+  ports:
+  - name: syslog
+    port: 5141
+    protocol: TCP
+    targetPort: 5141
+  selector:
+    app: solace-processor
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: solace-processor-metrics
+  labels:
+    app: solace-processor
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+  - name: metrics
+    port: 8080
+    targetPort: 8080
+  selector:
+    app: solace-processor
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: solace-processor
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: solace-processor
+  template:
+    metadata:
+      labels:
+        app: solace-processor
+    spec:
+      containers:
+      - name: processor
+        image: your-registry/solace-processor:latest
+        ports:
+        - containerPort: 5141
+          name: syslog
+        - containerPort: 8080
+          name: metrics
+        env:
+        - name: REDIS_HOST
+          value: redis
+        - name: HOSTNAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        volumeMounts:
+        - name: config
+          mountPath: /config
+        args:
+        - "--spring.config.import=file:/config/application.yml"
+        livenessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /actuator/health
+            port: 8080
+          initialDelaySeconds: 20
+          periodSeconds: 5
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+      volumes:
+      - name: config
+        configMap:
+          name: solace-processor-config
+
+--- prometheus-servicemonitor.yaml ---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: solace-processor
+  labels:
+    app: solace-processor
+spec:
+  selector:
+    matchLabels:
+      app: solace-processor
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /actuator/prometheus
+*/
+
+// ============================================================================
+// 13) Grafana Alert Queries
+// ============================================================================
+
+/*
+Grafana Alert Examples:
+
+1. HA Node Down:
+max without (instance, pod) (
+  sol_state_active{metric_base="sol_state_ha_redundancy_group_node"}
+) == 1
+
+2. Message Spool High:
+max without (instance, pod) (
+  sol_state_active{metric_base="sol_state_vpn_msg_spool_threshold"}
+) == 1
+
+3. Duration in Problem State:
+time() - max without (instance, pod) (
+  sol_state_since_unixtime{metric_base="sol_state_ha_redundancy_group_node"}
+) > 3600
+
+4. Event Rate Alert:
+sum by (vpn, host) (
+  increase(sol_event_VPN_AD_MSG_SPOOL_HIGH_total[5m])
+) > 5
+
+5. Processing Health:
+rate(syslog_events_processed[5m]) < 1
+
+6. Redis Health:
+redis_fallback_cache_size > 100
+*/
