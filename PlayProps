@@ -377,7 +377,6 @@ public class RedisLatchingStateStore implements LatchingStateStore {
     // Metrics
     private AtomicInteger fallbackCacheSize;
     private Counter redisErrors;
-    private Timer redisOperationTimer;
 
     private record CachedSnapshot(Map<String, State> data, long timestamp) {}
 
@@ -395,8 +394,6 @@ public class RedisLatchingStateStore implements LatchingStateStore {
         fallbackCacheSize = meterRegistry.gauge("redis.fallback.cache.size", 
                 new AtomicInteger(0));
         redisErrors = Counter.builder("redis.errors.total")
-                .register(meterRegistry);
-        redisOperationTimer = Timer.builder("redis.operation.duration")
                 .register(meterRegistry);
         
         // Register connection pool metrics
@@ -459,9 +456,15 @@ public class RedisLatchingStateStore implements LatchingStateStore {
         try {
             redis.execute(luaSetProblem, List.of(key),
                     String.valueOf(nowEpochSec), String.valueOf(ttlSec), processingPod());
-            sample.stop(redisOperationTimer.tags("operation", "setProblem", "status", "success"));
+            sample.stop(Timer.builder("redis.operation.duration")
+                    .tag("operation", "setProblem")
+                    .tag("status", "success")
+                    .register(meterRegistry));
         } catch (Exception e) {
-            sample.stop(redisOperationTimer.tags("operation", "setProblem", "status", "failure"));
+            sample.stop(Timer.builder("redis.operation.duration")
+                    .tag("operation", "setProblem")
+                    .tag("status", "failure")
+                    .register(meterRegistry));
             redisErrors.increment();
             log.error("Redis setProblem failed; buffering locally key={}", key, e);
             localFallbackCache.put(key, new State(1, nowEpochSec));
@@ -482,9 +485,15 @@ public class RedisLatchingStateStore implements LatchingStateStore {
         try {
             redis.execute(luaSetClear, List.of(key),
                     String.valueOf(nowEpochSec), processingPod());
-            sample.stop(redisOperationTimer.tags("operation", "setClear", "status", "success"));
+            sample.stop(Timer.builder("redis.operation.duration")
+                    .tag("operation", "setClear")
+                    .tag("status", "success")
+                    .register(meterRegistry));
         } catch (Exception e) {
-            sample.stop(redisOperationTimer.tags("operation", "setClear", "status", "failure"));
+            sample.stop(Timer.builder("redis.operation.duration")
+                    .tag("operation", "setClear")
+                    .tag("status", "failure")
+                    .register(meterRegistry));
             redisErrors.increment();
             log.error("Redis setClear failed; buffering locally key={}", key, e);
             localFallbackCache.put(key, new State(0, nowEpochSec));
@@ -590,11 +599,17 @@ public class RedisLatchingStateStore implements LatchingStateStore {
             }
 
             snapshotRef.set(new CachedSnapshot(out, now));
-            sample.stop(redisOperationTimer.tags("operation", "snapshot", "status", "success"));
+            sample.stop(Timer.builder("redis.operation.duration")
+                    .tag("operation", "snapshot")
+                    .tag("status", "success")
+                    .register(meterRegistry));
             return out;
 
         } catch (Exception e) {
-            sample.stop(redisOperationTimer.tags("operation", "snapshot", "status", "failure"));
+            sample.stop(Timer.builder("redis.operation.duration")
+                    .tag("operation", "snapshot")
+                    .tag("status", "failure")
+                    .register(meterRegistry));
             log.error("Failed to get snapshot from Redis", e);
             redisErrors.increment();
             // Return previous cache if available
