@@ -1,28 +1,57 @@
-// src/main/java/com/acme/solace/obz/EventPair.java
+// src/main/java/com/acme/solace/obz/LatchingStateStore.java
 package com.acme.solace.obz;
 
-import java.util.*;
+import java.util.Map;
 
-public enum EventPair {
-  HA_NODE("sol_state_ha_node_left", 
-          "sol_event_system_ha_redun_group_node_left_total",
-          "sol_event_system_ha_redun_group_node_joined_total",
-          List.of("vpn","host","group")),
-  BRIDGE_LINK("sol_state_vpn_bridging_link_rejected",
-              "sol_event_vpn_bridging_link_rejected_total",
-              "sol_event_vpn_bridging_link_accepted_total",   // or ..._up_total
-              List.of("vpn","host","link")),
-  CFGSYNC("sol_state_cfgsync_down",
-          "sol_event_system_cfgsync_down_total",
-          "sol_event_system_cfgsync_up_total",
-          List.of("vpn","host"));
+public interface LatchingStateStore {
+  record State(boolean active, long sinceEpochSec) {}
+  State get(String key);
+  void put(String key, State state);
+  Map<String, State> dump();  // for startup re-expose
+}
 
-  public final String metricBase;        // used for *_active and *_since_unixtime
-  public final String problemCounter;    // your existing counters
-  public final String recoveryCounter;   // your existing counters
-  public final List<String> labels;
+// src/main/java/com/acme/solace/obz/MapDbLatchingStateStore.java
+package com.acme.solace.obz;
 
-  EventPair(String base, String prob, String ok, List<String> labels) {
-    this.metricBase = base; this.problemCounter = prob; this.recoveryCounter = ok; this.labels = labels;
+import org.mapdb.*;
+import org.springframework.stereotype.Component;
+
+import java.nio.file.Path;
+import java.util.Map;
+
+@Component
+public class MapDbLatchingStateStore implements LatchingStateStore {
+  private final DB db;
+  private final HTreeMap<String, byte[]> map;
+
+  public MapDbLatchingStateStore() {
+    this(Path.of("data","solace-latch-state.db").toString());
+  }
+  public MapDbLatchingStateStore(String filePath) {
+    this.db = DBMaker.fileDB(filePath).fileMmapEnableIfSupported().transactionEnable().closeOnJvmShutdown().make();
+    this.map = db.hashMap("latches", Serializer.STRING, Serializer.BYTE_ARRAY).createOrOpen();
+  }
+
+  @Override public State get(String key) {
+    var b = map.get(key);
+    if (b == null) return new State(false, 0L);
+    // very small custom serialization: 1 byte active + 8 bytes since
+    boolean active = b[0] == 1;
+    long since = 0;
+    for (int i=1;i<=8;i++) since = (since<<8) | (b[i] & 0xff);
+    return new State(active, since);
+  }
+
+  @Override public void put(String key, State s) {
+    byte[] b = new byte[9];
+    b[0] = (byte)(s.active()?1:0);
+    long x = s.sinceEpochSec();
+    for (int i=8;i>=1;i--) { b[i] = (byte)(x & 0xff); x >>= 8; }
+    map.put(key, b);
+    db.commit();
+  }
+
+  @Override public Map<String, State> dump() {
+    return map.getEntries(); // MapDB returns a read-only view
   }
 }
