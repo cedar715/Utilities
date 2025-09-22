@@ -1,19 +1,27 @@
-A =
 clamp_min(
-  sum by (host) (sol_event_system_cfgsync_down_total)
-- (
+  (
+    sum by (host) (sol_event_system_cfgsync_down_total)
+    or on (host) 0 *
+      sum by (host) (sol_event_system_cfgsync_down_total or sol_event_system_cfgsync_up_total)
+  )
+  -
+  (
     sum by (host) (sol_event_system_cfgsync_up_total)
-    or on(host) 0 * sum by (host) (sol_event_system_cfgsync_down_total)
+    or on (host) 0 *
+      sum by (host) (sol_event_system_cfgsync_down_total or sol_event_system_cfgsync_up_total)
   )
 , 0)
-
-B =
 clamp_min(
-  sum by (host) (increase(sol_event_system_cfgsync_down_total[365d]))
-- (
+  (
+    sum by (host) (increase(sol_event_system_cfgsync_down_total[365d]))
+    or on (host) 0 *
+      sum by (host) (increase(sol_event_system_cfgsync_down_total[365d]) or increase(sol_event_system_cfgsync_up_total[365d]))
+  )
+  -
+  (
     sum by (host) (increase(sol_event_system_cfgsync_up_total[365d]))
-    or on(host) 0 * sum by (host) (increase(sol_event_system_cfgsync_down_total[365d]))
+    or on (host) 0 *
+      sum by (host) (increase(sol_event_system_cfgsync_down_total[365d]) or increase(sol_event_system_cfgsync_up_total[365d]))
   )
 , 0)
-
-D = sum by (host) (sol_event_system_cfgsync_down_total)
+$A > 0 || ($A == 0 && $B > 0)
