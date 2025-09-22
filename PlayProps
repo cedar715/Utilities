@@ -1,6 +1,19 @@
-B = clamp_min(
-  sum by (vpn, host) (increase(sol_event_system_cfgsync_down_total[30d]))
-- sum by (vpn, host) (increase(sol_event_system_cfgsync_up_total[30d]))
+A =
+clamp_min(
+  sum by (host) (sol_event_system_cfgsync_down_total)
+- (
+    sum by (host) (sol_event_system_cfgsync_up_total)
+    or on(host) 0 * sum by (host) (sol_event_system_cfgsync_down_total)
+  )
 , 0)
 
-(A > 0) or (A == 0 and B > 0 and sum by (vpn, host) (sol_event_system_cfgsync_down_total) > 0)
+B =
+clamp_min(
+  sum by (host) (increase(sol_event_system_cfgsync_down_total[365d]))
+- (
+    sum by (host) (increase(sol_event_system_cfgsync_up_total[365d]))
+    or on(host) 0 * sum by (host) (increase(sol_event_system_cfgsync_down_total[365d]))
+  )
+, 0)
+
+D = sum by (host) (sol_event_system_cfgsync_down_total)
