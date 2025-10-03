@@ -1,11 +1,4 @@
-relabel_configs:
-  - action: labeldrop
-    regex: '^http\.scheme$'
-  - action: labeldrop
-    regex: '^url\.scheme$'
-  - action: labeldrop
-    regex: '^net\.host\.name$'
-  - action: labeldrop
-    regex: '^net\.host\.port$'
-  - action: labeldrop
-    regex: '^service\.instance\.id$'
+kubectl get all -n <namespace> \
+  -l app.kubernetes.io/instance=<release-name> \
+  -o yaml \
+  | yq 'del(.items[] | select(.kind == "Secret"))'
