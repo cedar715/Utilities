@@ -1,6 +1,83 @@
-VPN="<VPN>"; Q="<QUEUE>"
-NOW=$(date -u +%s)
-IN5=$((NOW + 5*60))
+import requests
+import time
+from datetime import datetime, timedelta
 
-curl -su user:pass \
-"https://<broker>/SEMP/v2/monitor/msgVpns/$VPN/queues/$Q/msgs?select=msgId,expiryTime&where=expiryTime>=$NOW,expiryTime<=$IN5&count=100"
+BROKER_URL = "http://broker:8080"
+VPN_NAME = "your-vpn"
+QUEUE_NAME = "your-queue"
+USERNAME = "admin"
+PASSWORD = "password"
+TTL_HOURS = 48
+WARNING_THRESHOLD_HOURS = 6  # Alert when messages will expire in 6 hours
+
+def get_queue_stats():
+    url = f"{BROKER_URL}/SEMP/v2/monitor/msgVpns/{VPN_NAME}/queues/{QUEUE_NAME}"
+    params = {
+        "select": "queueName,msgCount,oldestMsgId,maxTtlExpiredDiscardedMsgCount"
+    }
+    
+    response = requests.get(url, auth=(USERNAME, PASSWORD), params=params)
+    return response.json()['data']
+
+def get_oldest_message():
+    url = f"{BROKER_URL}/SEMP/v2/monitor/msgVpns/{VPN_NAME}/queues/{QUEUE_NAME}/msgs"
+    params = {
+        "count": 1  # Get only the oldest message
+    }
+    
+    response = requests.get(url, auth=(USERNAME, PASSWORD), params=params)
+    messages = response.json().get('data', [])
+    
+    if messages:
+        return messages[0]
+    return None
+
+def calculate_time_to_expiry(spooled_time_ms, ttl_ms):
+    """Calculate time remaining until message expires"""
+    current_time_ms = int(time.time() * 1000)
+    expiry_time_ms = spooled_time_ms + ttl_ms
+    time_remaining_ms = expiry_time_ms - current_time_ms
+    
+    return time_remaining_ms / 1000 / 3600  # Convert to hours
+
+def monitor_queue():
+    queue_stats = get_queue_stats()
+    msg_count = queue_stats.get('msgCount', 0)
+    
+    if msg_count == 0:
+        print("Queue is empty")
+        return
+    
+    oldest_msg = get_oldest_message()
+    
+    if oldest_msg:
+        spooled_time = oldest_msg.get('spooledTime')
+        ttl = oldest_msg.get('ttl', TTL_HOURS * 3600 * 1000)  # TTL in ms
+        
+        if spooled_time:
+            hours_to_expiry = calculate_time_to_expiry(spooled_time, ttl)
+            
+            print(f"Queue: {QUEUE_NAME}")
+            print(f"Total Messages: {msg_count}")
+            print(f"Oldest Message Spooled: {datetime.fromtimestamp(spooled_time/1000)}")
+            print(f"Time Until Expiration: {hours_to_expiry:.2f} hours")
+            
+            # Alert logic
+            if hours_to_expiry < WARNING_THRESHOLD_HOURS:
+                print(f"⚠️  WARNING: Messages will expire in {hours_to_expiry:.2f} hours!")
+                # Send alert (email, Slack, PagerDuty, etc.)
+                return {
+                    "status": "warning",
+                    "hours_remaining": hours_to_expiry,
+                    "message_count": msg_count
+                }
+            else:
+                print(f"✅ OK: {hours_to_expiry:.2f} hours remaining")
+                return {
+                    "status": "ok",
+                    "hours_remaining": hours_to_expiry,
+                    "message_count": msg_count
+                }
+
+if __name__ == "__main__":
+    monitor_queue()
