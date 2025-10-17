@@ -1,83 +1,243 @@
 import requests
 import time
 from datetime import datetime, timedelta
+import urllib3
 
-BROKER_URL = "http://broker:8080"
+# Disable SSL warnings (since we're ignoring cert verification)
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# ============================================
+# Configuration
+# ============================================
+BROKER_URL = "https://your-broker.example.com:943"  # Note: HTTPS
 VPN_NAME = "your-vpn"
 QUEUE_NAME = "your-queue"
 USERNAME = "admin"
 PASSWORD = "password"
 TTL_HOURS = 48
 WARNING_THRESHOLD_HOURS = 6  # Alert when messages will expire in 6 hours
+CRITICAL_THRESHOLD_HOURS = 2  # Critical alert threshold
+
+# SSL Verification disabled (NOT RECOMMENDED FOR PRODUCTION)
+SSL_VERIFY = False
 
 def get_queue_stats():
+    """Get queue statistics from SEMP API"""
     url = f"{BROKER_URL}/SEMP/v2/monitor/msgVpns/{VPN_NAME}/queues/{QUEUE_NAME}"
     params = {
-        "select": "queueName,msgCount,oldestMsgId,maxTtlExpiredDiscardedMsgCount"
+        "select": "queueName,msgCount,oldestMsgId,maxTtlExpiredDiscardedMsgCount,msgSpoolUsage"
     }
     
-    response = requests.get(url, auth=(USERNAME, PASSWORD), params=params)
-    return response.json()['data']
+    try:
+        response = requests.get(
+            url, 
+            auth=(USERNAME, PASSWORD), 
+            params=params,
+            verify=SSL_VERIFY,  # Ignore SSL certificate verification
+            timeout=10
+        )
+        response.raise_for_status()
+        return response.json()['data']
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Error fetching queue stats: {e}")
+        return None
 
 def get_oldest_message():
+    """Get the oldest message in the queue"""
     url = f"{BROKER_URL}/SEMP/v2/monitor/msgVpns/{VPN_NAME}/queues/{QUEUE_NAME}/msgs"
     params = {
         "count": 1  # Get only the oldest message
     }
     
-    response = requests.get(url, auth=(USERNAME, PASSWORD), params=params)
-    messages = response.json().get('data', [])
-    
-    if messages:
-        return messages[0]
-    return None
+    try:
+        response = requests.get(
+            url, 
+            auth=(USERNAME, PASSWORD), 
+            params=params,
+            verify=SSL_VERIFY,  # Ignore SSL certificate verification
+            timeout=10
+        )
+        response.raise_for_status()
+        messages = response.json().get('data', [])
+        
+        if messages:
+            return messages[0]
+        return None
+    except requests.exceptions.RequestException as e:
+        print(f"❌ Error fetching oldest message: {e}")
+        return None
 
 def calculate_time_to_expiry(spooled_time_ms, ttl_ms):
-    """Calculate time remaining until message expires"""
+    """
+    Calculate time remaining until message expires
+    
+    Args:
+        spooled_time_ms: When message was spooled (Unix timestamp in milliseconds)
+        ttl_ms: Time-to-live value in milliseconds
+    
+    Returns:
+        Time remaining in hours (float)
+    """
     current_time_ms = int(time.time() * 1000)
     expiry_time_ms = spooled_time_ms + ttl_ms
     time_remaining_ms = expiry_time_ms - current_time_ms
     
     return time_remaining_ms / 1000 / 3600  # Convert to hours
 
+def format_timedelta(hours):
+    """Format hours into human-readable string"""
+    if hours < 0:
+        return "EXPIRED"
+    
+    days = int(hours // 24)
+    remaining_hours = int(hours % 24)
+    minutes = int((hours % 1) * 60)
+    
+    parts = []
+    if days > 0:
+        parts.append(f"{days}d")
+    if remaining_hours > 0:
+        parts.append(f"{remaining_hours}h")
+    if minutes > 0:
+        parts.append(f"{minutes}m")
+    
+    return " ".join(parts) if parts else "< 1m"
+
+def get_alert_status(hours_to_expiry):
+    """Determine alert status based on hours to expiry"""
+    if hours_to_expiry < 0:
+        return "EXPIRED", "🔴"
+    elif hours_to_expiry < CRITICAL_THRESHOLD_HOURS:
+        return "CRITICAL", "🔴"
+    elif hours_to_expiry < WARNING_THRESHOLD_HOURS:
+        return "WARNING", "⚠️"
+    else:
+        return "OK", "✅"
+
 def monitor_queue():
+    """Main monitoring function"""
+    print("=" * 60)
+    print(f"Solace Queue TTL Monitor - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("=" * 60)
+    
+    # Get queue statistics
     queue_stats = get_queue_stats()
+    
+    if not queue_stats:
+        print("❌ Failed to retrieve queue statistics")
+        return None
+    
     msg_count = queue_stats.get('msgCount', 0)
+    expired_count = queue_stats.get('maxTtlExpiredDiscardedMsgCount', 0)
+    spool_usage = queue_stats.get('msgSpoolUsage', 0)
+    
+    print(f"\n📊 Queue: {QUEUE_NAME}")
+    print(f"   VPN: {VPN_NAME}")
+    print(f"   Total Messages: {msg_count:,}")
+    print(f"   Spool Usage: {spool_usage:,} bytes")
+    print(f"   Expired (Total): {expired_count:,}")
     
     if msg_count == 0:
-        print("Queue is empty")
-        return
+        print("\n✅ Queue is empty - No messages to monitor")
+        return {
+            "status": "empty",
+            "message_count": 0,
+            "hours_remaining": None
+        }
     
+    # Get oldest message details
     oldest_msg = get_oldest_message()
     
-    if oldest_msg:
-        spooled_time = oldest_msg.get('spooledTime')
-        ttl = oldest_msg.get('ttl', TTL_HOURS * 3600 * 1000)  # TTL in ms
-        
-        if spooled_time:
-            hours_to_expiry = calculate_time_to_expiry(spooled_time, ttl)
+    if not oldest_msg:
+        print("\n⚠️  Could not retrieve oldest message details")
+        return None
+    
+    # Extract message details
+    msg_id = oldest_msg.get('msgId')
+    spooled_time = oldest_msg.get('spooledTime')
+    ttl = oldest_msg.get('ttl', TTL_HOURS * 3600 * 1000)  # TTL in milliseconds
+    
+    if not spooled_time:
+        print("\n⚠️  Oldest message does not have spool time information")
+        return None
+    
+    # Calculate time to expiry
+    hours_to_expiry = calculate_time_to_expiry(spooled_time, ttl)
+    status, icon = get_alert_status(hours_to_expiry)
+    
+    # Display oldest message information
+    spooled_datetime = datetime.fromtimestamp(spooled_time / 1000)
+    expiry_datetime = datetime.fromtimestamp((spooled_time + ttl) / 1000)
+    
+    print(f"\n📩 Oldest Message:")
+    print(f"   Message ID: {msg_id}")
+    print(f"   Spooled At: {spooled_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"   Will Expire: {expiry_datetime.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"   TTL: {ttl / 1000 / 3600:.1f} hours")
+    
+    print(f"\n⏱️  Time Until Expiration:")
+    print(f"   {format_timedelta(hours_to_expiry)} ({hours_to_expiry:.2f} hours)")
+    
+    print(f"\n{icon} Status: {status}")
+    
+    # Alert logic
+    if status == "CRITICAL":
+        print(f"\n🚨 CRITICAL ALERT: Messages will expire in {hours_to_expiry:.2f} hours!")
+        print(f"   Action Required: Increase consumer capacity immediately!")
+    elif status == "WARNING":
+        print(f"\n⚠️  WARNING: Messages will expire in {hours_to_expiry:.2f} hours!")
+        print(f"   Action Required: Monitor consumer performance")
+    elif status == "EXPIRED":
+        print(f"\n🔴 EXPIRED: Oldest message has already expired!")
+    else:
+        print(f"\n✅ OK: {hours_to_expiry:.2f} hours remaining before expiration")
+    
+    # Calculate consumption rate needed
+    if hours_to_expiry > 0 and msg_count > 0:
+        required_rate = msg_count / hours_to_expiry
+        print(f"\n📈 Required Consumption Rate:")
+        print(f"   {required_rate:.2f} messages/hour")
+        print(f"   {required_rate/60:.2f} messages/minute")
+    
+    print("\n" + "=" * 60)
+    
+    return {
+        "status": status.lower(),
+        "hours_remaining": hours_to_expiry,
+        "message_count": msg_count,
+        "expired_count": expired_count,
+        "oldest_msg_id": msg_id,
+        "spooled_time": spooled_datetime.isoformat(),
+        "expiry_time": expiry_datetime.isoformat()
+    }
+
+def continuous_monitor(interval_seconds=60):
+    """
+    Continuously monitor the queue at specified intervals
+    
+    Args:
+        interval_seconds: Time between monitoring checks (default: 60 seconds)
+    """
+    print(f"🔄 Starting continuous monitoring (interval: {interval_seconds}s)")
+    print(f"   Press Ctrl+C to stop\n")
+    
+    try:
+        while True:
+            result = monitor_queue()
             
-            print(f"Queue: {QUEUE_NAME}")
-            print(f"Total Messages: {msg_count}")
-            print(f"Oldest Message Spooled: {datetime.fromtimestamp(spooled_time/1000)}")
-            print(f"Time Until Expiration: {hours_to_expiry:.2f} hours")
+            if result and result['status'] in ['critical', 'warning']:
+                # You can add alerting here (email, Slack, PagerDuty, etc.)
+                # send_alert(result)
+                pass
             
-            # Alert logic
-            if hours_to_expiry < WARNING_THRESHOLD_HOURS:
-                print(f"⚠️  WARNING: Messages will expire in {hours_to_expiry:.2f} hours!")
-                # Send alert (email, Slack, PagerDuty, etc.)
-                return {
-                    "status": "warning",
-                    "hours_remaining": hours_to_expiry,
-                    "message_count": msg_count
-                }
-            else:
-                print(f"✅ OK: {hours_to_expiry:.2f} hours remaining")
-                return {
-                    "status": "ok",
-                    "hours_remaining": hours_to_expiry,
-                    "message_count": msg_count
-                }
+            time.sleep(interval_seconds)
+            
+    except KeyboardInterrupt:
+        print("\n\n🛑 Monitoring stopped by user")
 
 if __name__ == "__main__":
+    # Single check
     monitor_queue()
+    
+    # Uncomment below for continuous monitoring
+    # continuous_monitor(interval_seconds=60)
