@@ -1,4 +1,6 @@
-GET /SEMP/v2/monitor/msgVpns/{vpn}/queues/Q1/msgs
-    ?select=msgId,expiryTime
-    &where=expiryTime%3E%3D2025-10-17T14:00:00Z,expiryTime%3C%3D2025-10-17T14:05:00Z
-    &count=100
+VPN="<VPN>"; Q="<QUEUE>"
+NOW=$(date -u +%s)
+IN5=$((NOW + 5*60))
+
+curl -su user:pass \
+"https://<broker>/SEMP/v2/monitor/msgVpns/$VPN/queues/$Q/msgs?select=msgId,expiryTime&where=expiryTime>=$NOW,expiryTime<=$IN5&count=100"
