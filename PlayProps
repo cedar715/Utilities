@@ -1,4 +1,4 @@
-kubectl get all -n <namespace> \
-  -l app.kubernetes.io/instance=<release-name> \
-  -o yaml \
-  | yq 'del(.items[] | select(.kind == "Secret"))'
+GET /SEMP/v2/monitor/msgVpns/{vpn}/queues/Q1/msgs
+    ?select=msgId,expiryTime
+    &where=expiryTime%3E%3D2025-10-17T14:00:00Z,expiryTime%3C%3D2025-10-17T14:05:00Z
+    &count=100
