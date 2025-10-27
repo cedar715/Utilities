@@ -1,9 +1,370 @@
-# Depth (messages)
-depth = solace_queue_messages_current{vpn="$vpn", queue="$queue"}
-
-# Ingress / Egress rates (msgs/sec)
-ingress_rate = rate(solace_queue_messages_in_total{vpn="$vpn", queue="$queue"}[5m])
-egress_rate  = rate(solace_queue_messages_out_total{vpn="$vpn", queue="$queue"}[5m])
-
-# Backlog growth (msgs/sec) – positive = growing queue
-backlog_growth = ingress_rate - egress_rate
+{
+  "id": null,
+  "uid": null,
+  "title": "Solace — Messages Processed (HA + VPN)",
+  "timezone": "browser",
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "version": 1,
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "datasource",
+        "type": "datasource",
+        "query": "prometheus",
+        "hide": 0,
+        "current": {},
+        "refresh": 1,
+        "options": []
+      },
+      {
+        "name": "vpn",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "query": "label_values(solace_msg_vpn_ingress_msg_count_total, vpn_name)",
+        "includeAll": true,
+        "multi": true,
+        "hide": 0,
+        "refresh": 2,
+        "current": {}
+      },
+      {
+        "name": "broker",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "query": "label_values(solace_system_uptime_seconds, instance)",
+        "includeAll": true,
+        "multi": true,
+        "hide": 0,
+        "refresh": 2,
+        "current": {}
+      },
+      {
+        "name": "rate_window",
+        "type": "custom",
+        "query": "1m,5m,10m,30m",
+        "current": {
+          "text": "1m",
+          "value": "1m"
+        }
+      }
+    ]
+  },
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Processed Msgs/s (egress) — All Brokers / VPNs",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 8,
+        "h": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(solace_msg_vpn_egress_msg_count_total[$rate_window]))",
+          "legendFormat": "egress msg/s",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "horizontal",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Ingress Msgs/s — All Brokers / VPNs",
+      "gridPos": {
+        "x": 8,
+        "y": 0,
+        "w": 8,
+        "h": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(solace_msg_vpn_ingress_msg_count_total[$rate_window]))",
+          "legendFormat": "ingress msg/s",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "orientation": "horizontal",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Total Ingress Messages (cumulative)",
+      "gridPos": {
+        "x": 16,
+        "y": 0,
+        "w": 8,
+        "h": 5
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "expr": "sum(solace_msg_vpn_ingress_msg_count_total)",
+          "legendFormat": "total ingress msgs",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "orientation": "horizontal",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Message Rate per VPN (Ingress vs Egress)",
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 24,
+        "h": 9
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (vpn_name) (rate(solace_msg_vpn_ingress_msg_count_total{vpn_name=~\"$vpn\"}[$rate_window]))",
+          "legendFormat": "{{vpn_name}} — ingress",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (vpn_name) (rate(solace_msg_vpn_egress_msg_count_total{vpn_name=~\"$vpn\"}[$rate_window]))",
+          "legendFormat": "{{vpn_name}} — egress",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Ingress Rate by Broker (stacked)",
+      "gridPos": {
+        "x": 0,
+        "y": 14,
+        "w": 24,
+        "h": 9
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        },
+        "stacking": {
+          "mode": "normal"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (instance) (rate(solace_msg_vpn_ingress_msg_count_total{instance=~\"$broker\"}[$rate_window]))",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "barchart",
+      "title": "Top 10 VPNs by Egress Msgs/s",
+      "gridPos": {
+        "x": 0,
+        "y": 23,
+        "w": 12,
+        "h": 9
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "expr": "topk(10, sum by (vpn_name) (rate(solace_msg_vpn_egress_msg_count_total[$rate_window])))",
+          "legendFormat": "{{vpn_name}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "orientation": "horizontal",
+        "legend": {
+          "displayMode": "list",
+          "placement": "right"
+        }
+      }
+    },
+    {
+      "type": "bargauge",
+      "title": "Top 10 VPNs by Ingress Msgs/s",
+      "gridPos": {
+        "x": 12,
+        "y": 23,
+        "w": 12,
+        "h": 9
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "expr": "topk(10, sum by (vpn_name) (rate(solace_msg_vpn_ingress_msg_count_total[$rate_window])))",
+          "legendFormat": "{{vpn_name}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Broker Redundancy Role (Active=1, Standby=0)",
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 12,
+        "h": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "expr": "max by (instance, role) (solace_redundancy_role)",
+          "legendFormat": "{{instance}} — {{role}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "type": "table",
+      "title": "Per-VPN Cumulative Message Counters (Ingress/Egress)",
+      "gridPos": {
+        "x": 12,
+        "y": 32,
+        "w": 12,
+        "h": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "targets": [
+        {
+          "expr": "sum by (vpn_name) (solace_msg_vpn_ingress_msg_count_total{vpn_name=~\"$vpn\"})",
+          "legendFormat": "{{vpn_name}} ingress",
+          "refId": "A",
+          "format": "table"
+        },
+        {
+          "expr": "sum by (vpn_name) (solace_msg_vpn_egress_msg_count_total{vpn_name=~\"$vpn\"})",
+          "legendFormat": "{{vpn_name}} egress",
+          "refId": "B",
+          "format": "table"
+        }
+      ],
+      "options": {
+        "showHeader": true
+      }
+    }
+  ]
+}
