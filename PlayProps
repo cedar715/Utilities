@@ -6,3 +6,16 @@ clamp_min(
   ),
   0
 )
+
+
+clamp_min(
+  sum by (vpn, host, queue) (
+    increase(sql_event_vpn_ad_msg_spool_high_total[3d])
+  ) 
+  - 
+  sum by (vpn, host, queue) (
+    increase(sql_event_vpn_ad_msg_spool_high_clear_total[3d]) or 
+    0 * sum by (vpn, host, queue) (increase(sql_event_vpn_ad_msg_spool_high_total[3d]))
+  ),
+  0
+)
