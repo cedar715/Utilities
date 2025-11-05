@@ -1,0 +1,133 @@
+# Application Configuration
+spring:
+  application:
+    name: solace-otel-collector
+  profiles:
+    active: kafka
+  integration:
+    jdbc:
+      initialize-schema: always
+
+# Collector Configuration
+collector:
+  # TCP Server Settings
+  syslog-port: ${SYSLOG_PORT:514}
+  socket-timeout: ${SOCKET_TIMEOUT:60000}
+  buffer-size: ${BUFFER_SIZE:65536}
+  codec-type: ${CODEC_TYPE:lf}
+  max-message-size: ${MAX_MESSAGE_SIZE:1048576}
+  
+  # Thread Pool Settings
+  core-pool-size: ${CORE_POOL_SIZE:10}
+  max-pool-size: ${MAX_POOL_SIZE:50}
+  keep-alive-time: ${KEEP_ALIVE_TIME:60}
+  thread-queue-size: ${THREAD_QUEUE_SIZE:1000}
+  
+  # Channel Settings
+  channel-queue-size: ${CHANNEL_QUEUE_SIZE:10000}
+  error-queue-size: ${ERROR_QUEUE_SIZE:1000}
+  
+  # Retry Settings
+  max-retries: ${MAX_RETRIES:5}
+  retry-backoff-ms: ${RETRY_BACKOFF_MS:1000}
+  max-retry-backoff-ms: ${MAX_RETRY_BACKOFF_MS:30000}
+  
+  # Dead Letter Queue Settings
+  dead-letter-queue-enabled: ${DLQ_ENABLED:true}
+  dead-letter-queue-path: ${DLQ_PATH:/var/log/dlq/}
+  
+  # Circuit Breaker Settings
+  circuit-breaker-failure-threshold: ${CIRCUIT_BREAKER_THRESHOLD:10}
+  circuit-breaker-timeout-ms: ${CIRCUIT_BREAKER_TIMEOUT:30000}
+  
+  # Backpressure Settings
+  backpressure-threshold: ${BACKPRESSURE_THRESHOLD:0.8}
+  backpressure-enabled: ${BACKPRESSURE_ENABLED:true}
+  
+  # Health Check Settings
+  health-check-enabled: ${HEALTH_CHECK_ENABLED:true}
+  health-check-interval-ms: ${HEALTH_CHECK_INTERVAL:30000}
+  health-check-timeout-ms: ${HEALTH_CHECK_TIMEOUT:5000}
+
+# Kafka Configuration
+kafka:
+  # Basic Settings
+  brokers: ${KAFKA_BROKERS:localhost:9092}
+  topic: ${KAFKA_TOPIC:syslog-events}
+  group-id: ${KAFKA_GROUP_ID:syslog-collector-group}
+  
+  # Producer Timeout Settings (CRITICAL FOR RESILIENCE)
+  request-timeout-ms: ${KAFKA_REQUEST_TIMEOUT_MS:30000}
+  delivery-timeout-ms: ${KAFKA_DELIVERY_TIMEOUT_MS:120000}
+  max-block-ms: ${KAFKA_MAX_BLOCK_MS:60000}
+  
+  # Retry Settings
+  max-retries: ${KAFKA_MAX_RETRIES:5}
+  retry-backoff-ms: ${KAFKA_RETRY_BACKOFF_MS:1000}
+  
+  # Performance Settings
+  linger-ms: ${KAFKA_LINGER_MS:100}
+  batch-size: ${KAFKA_BATCH_SIZE:32768}
+  compression-type: ${KAFKA_COMPRESSION_TYPE:snappy}
+  acks: ${KAFKA_ACKS:1}
+  max-in-flight-requests: ${KAFKA_MAX_IN_FLIGHT_REQUESTS:5}
+  buffer-memory: ${KAFKA_BUFFER_MEMORY:67108864}
+  
+  # Connection Settings
+  reconnect-backoff-ms: ${KAFKA_RECONNECT_BACKOFF_MS:1000}
+  reconnect-backoff-max-ms: ${KAFKA_RECONNECT_BACKOFF_MAX_MS:10000}
+  connections-max-idle-ms: ${KAFKA_CONNECTIONS_MAX_IDLE_MS:540000}
+  metadata-max-age-ms: ${KAFKA_METADATA_MAX_AGE_MS:300000}
+  
+  # SSL/Security Settings (if needed)
+  ssl-enabled: ${KAFKA_SSL_ENABLED:false}
+  ssl-truststore-location: ${KAFKA_SSL_TRUSTSTORE_LOCATION:}
+  ssl-truststore-password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
+  ssl-keystore-location: ${KAFKA_SSL_KEYSTORE_LOCATION:}
+  ssl-keystore-password: ${KAFKA_SSL_KEYSTORE_PASSWORD:}
+  ssl-key-password: ${KAFKA_SSL_KEY_PASSWORD:}
+  security-protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+  sasl-mechanism: ${KAFKA_SASL_MECHANISM:}
+  sasl-jaas-config: ${KAFKA_SASL_JAAS_CONFIG:}
+  
+  # Dead Letter Queue Settings
+  dlq-topic: ${KAFKA_DLQ_TOPIC:syslog-events-dlq}
+  dlq-enabled: ${KAFKA_DLQ_ENABLED:true}
+  
+  # Health Check Settings
+  health-check-topic: ${KAFKA_HEALTH_CHECK_TOPIC:health-check-topic}
+  health-check-enabled: ${KAFKA_HEALTH_CHECK_ENABLED:true}
+
+# Logging Configuration
+logging:
+  level:
+    root: ${LOG_LEVEL:INFO}
+    com.yourcompany: ${APP_LOG_LEVEL:DEBUG}
+    org.springframework.integration: ${INTEGRATION_LOG_LEVEL:INFO}
+    org.apache.kafka: ${KAFKA_LOG_LEVEL:WARN}
+    org.springframework.kafka: ${SPRING_KAFKA_LOG_LEVEL:INFO}
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+  file:
+    name: ${LOG_FILE:/var/log/solace-otel-collector/app.log}
+    max-size: ${LOG_MAX_SIZE:100MB}
+    max-history: ${LOG_MAX_HISTORY:30}
+
+# Actuator/Management Endpoints (for monitoring)
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,info,prometheus
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true
+  metrics:
+    export:
+      prometheus:
+        enabled: ${PROMETHEUS_ENABLED:true}
+    tags:
+      application: ${spring.application.name}
+      environment: ${ENVIRONMENT:production}
