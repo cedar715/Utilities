@@ -52,3 +52,33 @@ Any internal/undocumented attributes that might already provide this information
 
 We are happy to provide additional details about our environment or participate in any beta testing if this feature moves forward.
 Thank you for your consideration.
+
+---
+
+Subject: Feature Request / Guidance Needed: Efficient Way to Retrieve “Oldest Message Age” for Queues (SEMP v2 Performance Impact)
+Hello Solace Support Team,
+I am currently running Solace PubSub+ version 10.11.1.167, and I’m looking for guidance—and possibly a feature request—regarding a reliable and efficient way to obtain the age of the oldest spooled message in a queue.
+Current Approach
+At present, we are using the SEMP v2 endpoint:
+GET /SEMP/v2/monitor/msgVpns/{msgVpn}/queues/{queue}/msgs?count=1
+This returns the oldest message, and we use the spooledTime field to calculate the message age.
+We run this query through a Prometheus job once every hour across six Solace Kits, each in HA (3-node) configuration.
+Issue Observed
+As expected, the /msgs endpoint is expensive, and we are seeing:
+CPU spikes of ~8–10% on brokers during every hourly poll
+Larger spikes on systems with large numbers of queues
+Overall system impact that scales with the number of queues
+This makes the current method operationally risky as message volume and queue count grow.
+Request
+I would like to ask:
+Is there an alternative, more efficient mechanism to obtain the age of the oldest message without querying /msgs?
+If not available today, can Solace consider a feature enhancement to expose this metric directly at the queue level, such as:
+A new field in /queues or /queueStats
+A lightweight counter or metric like oldestMsgAge, oldestMsgTimestamp, or similar
+Availability through Prometheus exporter or broker-level telemetry
+This would eliminate the need for us to query each queue’s /msgs endpoint, significantly reducing load on the broker.
+Why This Matters
+We use this metric to monitor queue health and detect stuck consumers. This is critical for operations, observability, and early alerting.
+A built-in queue-level metric would help reduce system overhead and improve the operational experience across large deployments.
+Please let me know if there is a recommended best practice or if this can be considered as a feature enhancement in an upcoming release.
+Thank you,
