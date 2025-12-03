@@ -1,21 +1,54 @@
-clamp_min(
-  (
-    sum by (vpn, host, queue) (increase(xyx[3d]))
-    unless
-    sum by (vpn, host, queue) (increase(xyx_clear[3d])) > 0
-  ),
-  0
-)
+Subject: Feature Request: Native "Oldest Message Age" Metric at Queue Level via SEMP v2
 
+Dear Solace Support Team,
+Summary
+We are requesting a native queue-level attribute in SEMP v2 that provides the age of the oldest spooled message directly, without requiring a call to the /msgs endpoint.
+Current Environment
 
-clamp_min(
-  sum by (vpn, host, queue) (
-    increase(sql_event_vpn_ad_msg_spool_high_total[3d])
-  ) 
-  - 
-  sum by (vpn, host, queue) (
-    increase(sql_event_vpn_ad_msg_spool_high_clear_total[3d]) or 
-    0 * sum by (vpn, host, queue) (increase(sql_event_vpn_ad_msg_spool_high_total[3d]))
-  ),
-  0
-)
+Broker Version: PubSub+ 10.11.1.167
+Deployment: 6 HA kits (3 instances each, 18 brokers total)
+Queue Count: High volume across the environment
+Monitoring Stack: Prometheus + Grafana
+
+Business Requirement
+We need to monitor message backlog age across all queues to detect consumer lag, stuck messages, and potential processing issues. Knowing how long the oldest message has been waiting in each queue is critical for our SLA monitoring and alerting.
+Current Approach & Challenges
+Since no direct "oldest message age" attribute exists at the queue level, we are currently using:
+GET /SEMP/v2/monitor/msgVpns/{msgVpnName}/queues/{queueName}/msgs?count=1
+This retrieves the oldest message's spooledTime, from which we calculate the age.
+However, this approach has significant performance implications:
+
+CPU Impact: Each polling cycle (hourly) causes an 8–10% CPU spike on brokers with large queue counts
+Scalability Concerns: The /msgs endpoint is expensive by design and not recommended for frequent polling, yet there is no alternative for this metric
+Operational Risk: As our queue count grows, this overhead will increase proportionally
+
+Feature Request
+We propose adding a native attribute at the queue object level, such as:
+GET /SEMP/v2/monitor/msgVpns/{msgVpnName}/queues/{queueName}
+Response:
+json{
+  "data": {
+    "queueName": "example-queue",
+    "spooledMsgCount": 15000,
+    "oldestMsgId": 123456,
+    "oldestMsgAgeSeconds": 3600,   // <-- Requested attribute
+    "oldestMsgSpooledTime": 1701234567,  // <-- Alternative: epoch timestamp
+    ...
+  }
+}
+Benefits of This Approach
+
+Efficiency: The broker already tracks oldestMsgId internally; exposing its timestamp or calculated age would be a lightweight addition
+Reduced Load: Eliminates the need to query the expensive /msgs endpoint for monitoring purposes
+Consistency: Aligns with existing queue-level metrics like spooledMsgCount and msgSpoolUsage
+Broad Applicability: This is a common monitoring requirement that would benefit the wider Solace user community
+
+Interim Guidance Request
+While this feature is being considered, we would appreciate any guidance on:
+
+Alternative approaches to obtain this metric with lower overhead
+Recommended polling strategies for environments with high queue counts
+Any internal/undocumented attributes that might already provide this information
+
+We are happy to provide additional details about our environment or participate in any beta testing if this feature moves forward.
+Thank you for your consideration.
