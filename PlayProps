@@ -1,4 +1,3 @@
-
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -106,7 +105,7 @@ public class OutboundFlowKafkaConfig {
      * *** MODIFIED: Added producer reset in recovery callback ***
      */
     @Bean
-    public RequestHandlerRetryAdvice kafkaRetryAdvice(@Qualifier("kafkaDlqChannel") MessageChannel dlqChannel) {
+    public RequestHandlerRetryAdvice kafkaRetryAdvice(@Qualifier("producerChannel") MessageChannel producerChannel) {
         RequestHandlerRetryAdvice advice = new RequestHandlerRetryAdvice();
 
         RetryTemplate template = new RetryTemplate();
@@ -126,7 +125,7 @@ public class OutboundFlowKafkaConfig {
 
         advice.setRetryTemplate(template);
 
-        // *** MODIFIED: Reset producer after exhausting retries ***
+        // *** MODIFIED: Reset producer and re-queue to producerChannel ***
         advice.setRecoveryCallback(ctx -> {
             Message<?> failed = (Message<?>) ctx.getAttribute("message");
             Throwable lastError = ctx.getLastThrowable();
@@ -136,8 +135,10 @@ public class OutboundFlowKafkaConfig {
                 resetProducer();
             }
             
+            // Re-queue to producerChannel for retry with fresh producer
             if (failed != null) {
-                dlqChannel.send(failed);
+                log.warn("Re-queuing message to producerChannel after producer reset");
+                producerChannel.send(failed);
             }
             return null;
         });
