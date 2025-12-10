@@ -1,1 +1,248 @@
 
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.common.config.SslConfigs;
+import org.apache.kafka.common.errors.TimeoutException;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Profile;
+import org.springframework.integration.annotation.IntegrationComponentScan;
+import org.springframework.integration.channel.MessageChannels;
+import org.springframework.integration.config.EnableIntegration;
+import org.springframework.integration.dsl.IntegrationFlow;
+import org.springframework.integration.dsl.IntegrationFlows;
+import org.springframework.integration.handler.LoggingHandler;
+import org.springframework.integration.handler.advice.RequestHandlerRetryAdvice;
+import org.springframework.integration.kafka.outbound.KafkaProducerMessageHandler;
+import org.springframework.kafka.core.DefaultKafkaProducerFactory;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.core.ProducerFactory;
+import org.springframework.kafka.support.serializer.JsonSerializer;
+import org.springframework.messaging.Message;
+import org.springframework.messaging.MessageChannel;
+import org.springframework.retry.backoff.ExponentialBackOffPolicy;
+import org.springframework.retry.policy.SimpleRetryPolicy;
+import org.springframework.retry.support.RetryTemplate;
+import org.springframework.expression.common.LiteralExpression;
+import org.springframework.util.StringUtils;
+
+import java.util.HashMap;
+import java.util.Map;
+
+/**
+ * Outbound flow -> producerChannel -> Kafka with:
+ * - SI-level retry (exponential backoff)
+ * - sendFailureChannel for async errors
+ * - DLQ channel for messages that give up
+ * - Kafka producer timeouts tuned for slow brokers
+ * - *** NEW: Producer reset on TimeoutException ***
+ */
+@Slf4j
+@Configuration
+@EnableIntegration
+@IntegrationComponentScan
+@RequiredArgsConstructor
+@Profile("kafka")
+public class OutboundFlowKafkaConfig {
+
+    private static final String APP_NAME = "solace-otel-collector";
+
+    private final KafkaConfig kafkaConfig;
+
+    // *** NEW: Hold reference for reset capability ***
+    private DefaultKafkaProducerFactory<String, SolaceSyslogEvent> producerFactory;
+
+    /**
+     * Main outbound flow:
+     * producerChannel -> kafkaMessageHandler (with retry advice)
+     */
+    @Bean
+    public IntegrationFlow kafkaIntegrationFlow(
+            @Qualifier("producerChannel") MessageChannel producerChannel,
+            KafkaProducerMessageHandler<String, SolaceSyslogEvent> kafkaMessageHandler,
+            RequestHandlerRetryAdvice kafkaRetryAdvice
+    ) {
+        return IntegrationFlows.from(producerChannel)
+                .handle(kafkaMessageHandler, e -> e.advice(kafkaRetryAdvice))
+                .get();
+    }
+
+    /**
+     * Error flow for async send failures (producer.setSendFailureChannel(...))
+     */
+    @Bean
+    public IntegrationFlow producerErrorHandlingFlow(@Qualifier("producerErrorChannel") MessageChannel errorChannel) {
+        return IntegrationFlows.from(errorChannel)
+                .log(LoggingHandler.Level.ERROR, "KafkaErrorLogger",
+                        m -> String.format("Error sending data to Kafka. Payload: %s", m.getPayload()))
+                .get();
+    }
+
+    /**
+     * DLQ flow - messages that exhausted SI retry land here.
+     */
+    @Bean
+    public IntegrationFlow kafkaDlqFlow(@Qualifier("kafkaDlqChannel") MessageChannel dlqChannel) {
+        return IntegrationFlows.from(dlqChannel)
+                .log(LoggingHandler.Level.ERROR, "KafkaDLQ",
+                        m -> "Message sent to DLQ after retries: " + m.getPayload())
+                .get();
+    }
+
+    @Bean
+    public MessageChannel producerErrorChannel() {
+        return MessageChannels.queue("producerErrorChannel", 100).getObject();
+    }
+
+    @Bean
+    public MessageChannel kafkaDlqChannel() {
+        return MessageChannels.queue("kafkaDlqChannel", 1000).getObject();
+    }
+
+    /**
+     * Spring Integration retry on the handler itself.
+     * *** MODIFIED: Added producer reset in recovery callback ***
+     */
+    @Bean
+    public RequestHandlerRetryAdvice kafkaRetryAdvice(@Qualifier("kafkaDlqChannel") MessageChannel dlqChannel) {
+        RequestHandlerRetryAdvice advice = new RequestHandlerRetryAdvice();
+
+        RetryTemplate template = new RetryTemplate();
+
+        int maxAttempts = kafkaConfig.getMaxRetries() != null ? kafkaConfig.getMaxRetries() : 5;
+
+        SimpleRetryPolicy retryPolicy = new SimpleRetryPolicy(maxAttempts);
+        ExponentialBackOffPolicy backOffPolicy = new ExponentialBackOffPolicy();
+        backOffPolicy.setInitialInterval(
+                kafkaConfig.getRetryBackoffMs() != null ? kafkaConfig.getRetryBackoffMs() : 1_000
+        );
+        backOffPolicy.setMultiplier(2.0);
+        backOffPolicy.setMaxInterval(30_000);
+
+        template.setRetryPolicy(retryPolicy);
+        template.setBackOffPolicy(backOffPolicy);
+
+        advice.setRetryTemplate(template);
+
+        // *** MODIFIED: Reset producer after exhausting retries ***
+        advice.setRecoveryCallback(ctx -> {
+            Message<?> failed = (Message<?>) ctx.getAttribute("message");
+            Throwable lastError = ctx.getLastThrowable();
+            
+            // Reset producer if it's a timeout/connection error
+            if (shouldResetProducer(lastError)) {
+                resetProducer();
+            }
+            
+            if (failed != null) {
+                dlqChannel.send(failed);
+            }
+            return null;
+        });
+
+        return advice;
+    }
+
+    // *** NEW: Check if error warrants producer reset ***
+    private boolean shouldResetProducer(Throwable throwable) {
+        if (throwable == null) return false;
+        
+        Throwable cause = throwable;
+        while (cause != null) {
+            String name = cause.getClass().getSimpleName();
+            if (cause instanceof TimeoutException ||
+                name.contains("NetworkException") ||
+                name.contains("DisconnectException") ||
+                name.contains("TimeoutException")) {
+                return true;
+            }
+            cause = cause.getCause();
+        }
+        return false;
+    }
+
+    // *** NEW: Reset the producer to force new connection ***
+    private synchronized void resetProducer() {
+        if (producerFactory != null) {
+            log.warn("Resetting Kafka producer due to connection/timeout error");
+            try {
+                producerFactory.reset();
+                log.info("Kafka producer reset successfully - new connection will be established");
+            } catch (Exception e) {
+                log.error("Failed to reset Kafka producer", e);
+            }
+        }
+    }
+
+    /**
+     * Kafka handler - synchronous for SI retry to work
+     */
+    @Bean
+    public KafkaProducerMessageHandler<String, SolaceSyslogEvent> kafkaMessageHandler() {
+        KafkaProducerMessageHandler<String, SolaceSyslogEvent> handler =
+                new KafkaProducerMessageHandler<>(kafkaTemplate());
+        handler.setTopicExpression(new LiteralExpression(kafkaConfig.getTopic()));
+        handler.setMessageKeyExpression(new LiteralExpression(APP_NAME));
+        handler.setSendFailureChannel(producerErrorChannel());
+        handler.setSync(true);
+        return handler;
+    }
+
+    @Bean
+    public KafkaTemplate<String, SolaceSyslogEvent> kafkaTemplate() {
+        return new KafkaTemplate<>(producerFactory());
+    }
+
+    @Bean
+    public ProducerFactory<String, SolaceSyslogEvent> producerFactory() {
+        // *** MODIFIED: Store reference for reset capability ***
+        this.producerFactory = new DefaultKafkaProducerFactory<>(producerConfigs());
+        return this.producerFactory;
+    }
+
+    @Bean
+    public Map<String, Object> producerConfigs() {
+        Map<String, Object> props = new HashMap<>();
+
+        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaConfig.getBrokers());
+        props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, org.apache.kafka.common.serialization.StringSerializer.class);
+        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
+
+        props.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG,
+                kafkaConfig.getRequestTimeoutMs() != null ? kafkaConfig.getRequestTimeoutMs() : 30_000);
+        props.put(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG,
+                kafkaConfig.getDeliveryTimeoutMs() != null ? kafkaConfig.getDeliveryTimeoutMs() : 120_000);
+        props.put(ProducerConfig.MAX_BLOCK_MS_CONFIG,
+                kafkaConfig.getMaxBlockMs() != null ? kafkaConfig.getMaxBlockMs() : 60_000);
+
+        props.put(ProducerConfig.RETRIES_CONFIG,
+                kafkaConfig.getMaxRetries() != null ? kafkaConfig.getMaxRetries() : Integer.MAX_VALUE);
+        props.put(ProducerConfig.RETRY_BACKOFF_MS_CONFIG,
+                kafkaConfig.getRetryBackoffMs() != null ? kafkaConfig.getRetryBackoffMs() : 1_000);
+
+        props.put(ProducerConfig.LINGER_MS_CONFIG,
+                kafkaConfig.getLingerMs() != null ? kafkaConfig.getLingerMs() : 100);
+        props.put(ProducerConfig.BATCH_SIZE_CONFIG,
+                kafkaConfig.getBatchSize() != null ? kafkaConfig.getBatchSize() : 32 * 1024);
+        props.put(ProducerConfig.COMPRESSION_TYPE_CONFIG,
+                StringUtils.hasText(kafkaConfig.getCompressionType()) ? kafkaConfig.getCompressionType() : "snappy");
+        props.put(ProducerConfig.BUFFER_MEMORY_CONFIG,
+                kafkaConfig.getBufferMemory() != null ? kafkaConfig.getBufferMemory() : 64L * 1024 * 1024);
+
+        props.put(ProducerConfig.ACKS_CONFIG,
+                StringUtils.hasText(kafkaConfig.getAcks()) ? kafkaConfig.getAcks() : "all");
+        props.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION,
+                kafkaConfig.getMaxInFlightRequests() != null ? kafkaConfig.getMaxInFlightRequests() : 1);
+        props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
+
+        if (Boolean.TRUE.equals(kafkaConfig.getSslEnabled())) {
+            props.put("security.protocol", kafkaConfig.getSecurityProtocol());
+            props.put(SslConfigs.SSL_TRUSTSTORE_LOCATION_CONFIG, kafkaConfig.getSslTruststoreLocation());
+            props.put(SslConfigs.SSL_TRUSTSTORE_PASSWORD_CONFIG, kafkaConfig.getSslTruststorePassword());
+        }
+
+        return props;
+    }
+}
