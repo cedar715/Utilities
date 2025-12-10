@@ -13,7 +13,6 @@ import org.springframework.integration.config.EnableIntegration;
 import org.springframework.integration.dsl.IntegrationFlow;
 import org.springframework.integration.dsl.IntegrationFlows;
 import org.springframework.integration.handler.LoggingHandler;
-import org.springframework.integration.handler.advice.RequestHandlerRetryAdvice;
 import org.springframework.integration.kafka.outbound.KafkaProducerMessageHandler;
 import org.springframework.kafka.core.DefaultKafkaProducerFactory;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -21,9 +20,6 @@ import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.kafka.support.serializer.JsonSerializer;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
-import org.springframework.retry.backoff.ExponentialBackOffPolicy;
-import org.springframework.retry.policy.SimpleRetryPolicy;
-import org.springframework.retry.support.RetryTemplate;
 import org.springframework.expression.common.LiteralExpression;
 import org.springframework.util.StringUtils;
 
@@ -32,11 +28,10 @@ import java.util.Map;
 
 /**
  * Outbound flow -> producerChannel -> Kafka with:
- * - SI-level retry (exponential backoff)
- * - sendFailureChannel for async errors
- * - DLQ channel for messages that give up
- * - Kafka producer timeouts tuned for slow brokers
- * - *** NEW: Producer reset on TimeoutException ***
+ * - Async sends for high throughput
+ * - sendFailureChannel for error handling
+ * - Producer reset on TimeoutException/NetworkException
+ * - Re-queue failed messages to producerChannel
  */
 @Slf4j
 @Configuration
@@ -55,28 +50,63 @@ public class OutboundFlowKafkaConfig {
 
     /**
      * Main outbound flow:
-     * producerChannel -> kafkaMessageHandler (with retry advice)
+     * producerChannel -> kafkaMessageHandler (async - errors go to producerErrorChannel)
      */
     @Bean
     public IntegrationFlow kafkaIntegrationFlow(
             @Qualifier("producerChannel") MessageChannel producerChannel,
-            KafkaProducerMessageHandler<String, SolaceSyslogEvent> kafkaMessageHandler,
-            RequestHandlerRetryAdvice kafkaRetryAdvice
+            KafkaProducerMessageHandler<String, SolaceSyslogEvent> kafkaMessageHandler
     ) {
         return IntegrationFlows.from(producerChannel)
-                .handle(kafkaMessageHandler, e -> e.advice(kafkaRetryAdvice))
+                .handle(kafkaMessageHandler)
                 .get();
     }
 
     /**
-     * Error flow for async send failures (producer.setSendFailureChannel(...))
+     * Error flow for async send failures
+     * *** MODIFIED: Reset producer and re-queue on timeout errors ***
      */
     @Bean
-    public IntegrationFlow producerErrorHandlingFlow(@Qualifier("producerErrorChannel") MessageChannel errorChannel) {
+    public IntegrationFlow producerErrorHandlingFlow(
+            @Qualifier("producerErrorChannel") MessageChannel errorChannel,
+            @Qualifier("producerChannel") MessageChannel producerChannel
+    ) {
         return IntegrationFlows.from(errorChannel)
-                .log(LoggingHandler.Level.ERROR, "KafkaErrorLogger",
-                        m -> String.format("Error sending data to Kafka. Payload: %s", m.getPayload()))
+                .handle(m -> {
+                    Throwable cause = extractCause(m.getPayload());
+                    log.error("Async Kafka send failed: {}", cause.getMessage());
+                    
+                    if (shouldResetProducer(cause)) {
+                        resetProducer();
+                        
+                        // Re-queue the original message
+                        Message<?> failedMessage = extractFailedMessage(m.getPayload());
+                        if (failedMessage != null) {
+                            log.warn("Re-queuing message after producer reset");
+                            producerChannel.send(failedMessage);
+                        }
+                    }
+                })
                 .get();
+    }
+    
+    // Extract cause from ErrorMessage
+    private Throwable extractCause(Object payload) {
+        if (payload instanceof org.springframework.kafka.support.KafkaSendFailureException kfe) {
+            return kfe.getCause() != null ? kfe.getCause() : kfe;
+        }
+        if (payload instanceof Throwable t) {
+            return t;
+        }
+        return new RuntimeException("Unknown error: " + payload);
+    }
+    
+    // Extract original message from ErrorMessage
+    private Message<?> extractFailedMessage(Object payload) {
+        if (payload instanceof org.springframework.kafka.support.KafkaSendFailureException kfe) {
+            return kfe.getFailedMessage();
+        }
+        return null;
     }
 
     /**
@@ -98,52 +128,6 @@ public class OutboundFlowKafkaConfig {
     @Bean
     public MessageChannel kafkaDlqChannel() {
         return MessageChannels.queue("kafkaDlqChannel", 1000).getObject();
-    }
-
-    /**
-     * Spring Integration retry on the handler itself.
-     * *** MODIFIED: Added producer reset in recovery callback ***
-     */
-    @Bean
-    public RequestHandlerRetryAdvice kafkaRetryAdvice(@Qualifier("producerChannel") MessageChannel producerChannel) {
-        RequestHandlerRetryAdvice advice = new RequestHandlerRetryAdvice();
-
-        RetryTemplate template = new RetryTemplate();
-
-        int maxAttempts = kafkaConfig.getMaxRetries() != null ? kafkaConfig.getMaxRetries() : 5;
-
-        SimpleRetryPolicy retryPolicy = new SimpleRetryPolicy(maxAttempts);
-        ExponentialBackOffPolicy backOffPolicy = new ExponentialBackOffPolicy();
-        backOffPolicy.setInitialInterval(
-                kafkaConfig.getRetryBackoffMs() != null ? kafkaConfig.getRetryBackoffMs() : 1_000
-        );
-        backOffPolicy.setMultiplier(2.0);
-        backOffPolicy.setMaxInterval(30_000);
-
-        template.setRetryPolicy(retryPolicy);
-        template.setBackOffPolicy(backOffPolicy);
-
-        advice.setRetryTemplate(template);
-
-        // *** MODIFIED: Reset producer and re-queue to producerChannel ***
-        advice.setRecoveryCallback(ctx -> {
-            Message<?> failed = (Message<?>) ctx.getAttribute("message");
-            Throwable lastError = ctx.getLastThrowable();
-            
-            // Reset producer if it's a timeout/connection error
-            if (shouldResetProducer(lastError)) {
-                resetProducer();
-            }
-            
-            // Re-queue to producerChannel for retry with fresh producer
-            if (failed != null) {
-                log.warn("Re-queuing message to producerChannel after producer reset");
-                producerChannel.send(failed);
-            }
-            return null;
-        });
-
-        return advice;
     }
 
     // *** NEW: Check if error warrants producer reset ***
@@ -178,7 +162,7 @@ public class OutboundFlowKafkaConfig {
     }
 
     /**
-     * Kafka handler - synchronous for SI retry to work
+     * Kafka handler - async for high throughput
      */
     @Bean
     public KafkaProducerMessageHandler<String, SolaceSyslogEvent> kafkaMessageHandler() {
@@ -187,7 +171,7 @@ public class OutboundFlowKafkaConfig {
         handler.setTopicExpression(new LiteralExpression(kafkaConfig.getTopic()));
         handler.setMessageKeyExpression(new LiteralExpression(APP_NAME));
         handler.setSendFailureChannel(producerErrorChannel());
-        handler.setSync(true);
+        handler.setSync(false);  // Async for high throughput - errors handled in producerErrorHandlingFlow
         return handler;
     }
 
