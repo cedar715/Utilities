@@ -1,321 +1,71 @@
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.apache.kafka.clients.producer.ProducerConfig;
-import org.apache.kafka.common.config.SslConfigs;
-import org.apache.kafka.common.errors.TimeoutException;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Profile;
-import org.springframework.integration.annotation.IntegrationComponentScan;
-import org.springframework.integration.channel.MessageChannels;
-import org.springframework.integration.config.EnableIntegration;
-import org.springframework.integration.dsl.IntegrationFlow;
-import org.springframework.integration.dsl.IntegrationFlows;
-import org.springframework.integration.handler.LoggingHandler;
-import org.springframework.integration.kafka.outbound.KafkaProducerMessageHandler;
-import org.springframework.kafka.core.DefaultKafkaProducerFactory;
-import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.kafka.core.ProducerFactory;
-import org.springframework.kafka.support.serializer.JsonSerializer;
-import org.springframework.messaging.Message;
-import org.springframework.messaging.MessageChannel;
-import org.springframework.messaging.support.MessageBuilder;
-import org.springframework.expression.common.LiteralExpression;
-import org.springframework.util.StringUtils;
+plugins {
+    id("org.springframework.boot") version "3.2.2"
+    id("io.spring.dependency-management") version "1.1.4"
+    kotlin("jvm") version "1.9.22"
+    kotlin("plugin.spring") version "1.9.22"
+}
 
-import java.util.HashMap;
-import java.util.Map;
-import java.util.concurrent.atomic.AtomicLong;
-
-/**
- * Outbound flow -> producerChannel -> Kafka with:
- * - Async sends for high throughput
- * - sendFailureChannel for error handling
- * - Producer reset on TimeoutException/NetworkException (rate-limited)
- * - Bounded re-queue with exponential backoff, then DLQ
- */
-@Slf4j
-@Configuration
-@EnableIntegration
-@IntegrationComponentScan
-@RequiredArgsConstructor
-@Profile("kafka")
-public class OutboundFlowKafkaConfig {
-
-    private static final String APP_NAME = "solace-otel-collector";
-
-    // Header to track retries
-    private static final String RETRY_HEADER = "kafka_retry_count";
-
-    // Max re-queue attempts after producer errors
-    private static final int MAX_RETRIES = 3;
-
-    // Backoff settings: 2s, 4s, 8s (capped at 10s)
-    private static final long INITIAL_BACKOFF_MS = 2_000L;
-    private static final long MAX_BACKOFF_MS = 10_000L;
-
-    // Minimum interval between producer resets
-    private static final long MIN_RESET_INTERVAL_MS = 30_000L; // 30 seconds
-
-    private final KafkaConfig kafkaConfig;
-
-    // Hold reference for reset capability
-    private DefaultKafkaProducerFactory<String, SolaceSyslogEvent> producerFactory;
-
-    // Track last reset time to avoid thrashing
-    private final AtomicLong lastResetTime = new AtomicLong(0L);
-
-    /**
-     * Main outbound flow:
-     * producerChannel -> kafkaMessageHandler (async - errors go to producerErrorChannel)
-     */
-    @Bean
-    public IntegrationFlow kafkaIntegrationFlow(
-            @Qualifier("producerChannel") MessageChannel producerChannel,
-            KafkaProducerMessageHandler<String, SolaceSyslogEvent> kafkaMessageHandler
-    ) {
-        return IntegrationFlows.from(producerChannel)
-                .handle(kafkaMessageHandler)
-                .get();
+java {
+    toolchain {
+        languageVersion.set(JavaLanguageVersion.of(17))
     }
+}
 
-    /**
-     * Error flow for async send failures.
-     * - Detect timeout/network errors
-     * - Rate-limit producer reset
-     * - Exponential backoff before re-queue
-     * - Max retries then DLQ
-     */
-    @Bean
-    public IntegrationFlow producerErrorHandlingFlow(
-            @Qualifier("producerErrorChannel") MessageChannel errorChannel,
-            @Qualifier("producerChannel") MessageChannel producerChannel,
-            @Qualifier("kafkaDlqChannel") MessageChannel dlqChannel
-    ) {
-        return IntegrationFlows.from(errorChannel)
-                .handle(m -> handleProducerError(m, producerChannel, dlqChannel))
-                .get();
-    }
+dependencies {
 
-    private void handleProducerError(Message<?> errorMessage, 
-                                      MessageChannel producerChannel, 
-                                      MessageChannel dlqChannel) {
-        Throwable cause = extractCause(errorMessage.getPayload());
-        Message<?> failedMessage = extractFailedMessage(errorMessage.getPayload());
+    /* =========================
+     * Spring Boot / Core
+     * ========================= */
+    implementation("org.springframework.boot:spring-boot-starter")
+    implementation("org.springframework.boot:spring-boot-starter-actuator")
 
-        if (failedMessage == null) {
-            log.error("Kafka send failed, could not extract original message: {}", 
-                    cause != null ? cause.getMessage() : "unknown");
-            return;
-        }
+    /* =========================
+     * Spring Integration
+     * ========================= */
+    implementation("org.springframework.integration:spring-integration-core")
 
-        int retryCount = getRetryCount(failedMessage);
+    // If you receive syslog over TCP
+    implementation("org.springframework.integration:spring-integration-ip")
 
-        // Log with context
-        log.warn("Kafka send failed (attempt {}/{}): {}", 
-                retryCount + 1, MAX_RETRIES, cause != null ? cause.getMessage() : "unknown");
+    // Optional (if you already use HTTP elsewhere)
+    implementation("org.springframework.integration:spring-integration-http")
 
-        // Reset producer if needed (rate-limited)
-        if (shouldResetProducer(cause) && tryReset()) {
-            resetProducer();
-        }
+    /* =========================
+     * OpenTelemetry (Logs + OTLP)
+     * ========================= */
 
-        // Check if retries exhausted
-        if (retryCount >= MAX_RETRIES) {
-            log.error("Max retries ({}) exhausted. Sending to DLQ.", MAX_RETRIES);
-            dlqChannel.send(failedMessage);
-            return;
-        }
+    // Core OTEL API
+    implementation("io.opentelemetry:opentelemetry-api")
 
-        // Exponential backoff: 2s, 4s, 8s... capped at 10s
-        long backoffMs = Math.min(INITIAL_BACKOFF_MS * (1L << retryCount), MAX_BACKOFF_MS);
-        log.debug("Backing off {}ms before retry", backoffMs);
-        
-        try {
-            Thread.sleep(backoffMs);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            log.warn("Backoff interrupted, sending to DLQ");
-            dlqChannel.send(failedMessage);
-            return;
-        }
+    // SDK
+    implementation("io.opentelemetry:opentelemetry-sdk")
 
-        // Re-queue with incremented retry count
-        Message<?> retryMessage = MessageBuilder
-                .fromMessage(failedMessage)
-                .setHeader(RETRY_HEADER, retryCount + 1)
-                .build();
+    // Logs SDK (required for LogRecord)
+    implementation("io.opentelemetry:opentelemetry-sdk-logs")
 
-        producerChannel.send(retryMessage);
-    }
+    // OTLP exporters (HTTP + gRPC included)
+    implementation("io.opentelemetry:opentelemetry-exporter-otlp")
 
-    private int getRetryCount(Message<?> message) {
-        Object count = message.getHeaders().get(RETRY_HEADER);
-        return count instanceof Integer ? (Integer) count : 0;
-    }
+    // Semantic conventions (ResourceAttributes, etc.)
+    implementation("io.opentelemetry:opentelemetry-semconv")
 
-    private Throwable extractCause(Object payload) {
-        if (payload instanceof org.springframework.kafka.support.KafkaSendFailureException kfe) {
-            return kfe.getCause() != null ? kfe.getCause() : kfe;
-        }
-        if (payload instanceof Throwable t) {
-            return t;
-        }
-        return null;
-    }
+    /* =========================
+     * JSON / Utilities
+     * ========================= */
+    implementation("com.fasterxml.jackson.core:jackson-databind")
 
-    private Message<?> extractFailedMessage(Object payload) {
-        if (payload instanceof org.springframework.kafka.support.KafkaSendFailureException kfe) {
-            return kfe.getFailedMessage();
-        }
-        return null;
-    }
+    /* =========================
+     * Observability (optional but recommended)
+     * ========================= */
+    runtimeOnly("io.micrometer:micrometer-registry-prometheus")
 
-    /**
-     * DLQ flow - messages that exhausted retries land here.
-     */
-    @Bean
-    public IntegrationFlow kafkaDlqFlow(@Qualifier("kafkaDlqChannel") MessageChannel dlqChannel) {
-        return IntegrationFlows.from(dlqChannel)
-                .log(LoggingHandler.Level.ERROR, "KafkaDLQ",
-                        m -> "Message sent to DLQ: " + m.getPayload())
-                .get();
-    }
+    /* =========================
+     * Logging
+     * ========================= */
+    runtimeOnly("ch.qos.logback:logback-classic")
 
-    @Bean
-    public MessageChannel producerErrorChannel() {
-        return MessageChannels.queue("producerErrorChannel", 100).getObject();
-    }
-
-    @Bean
-    public MessageChannel kafkaDlqChannel() {
-        return MessageChannels.queue("kafkaDlqChannel", 1_000).getObject();
-    }
-
-    // Check if error warrants producer reset
-    private boolean shouldResetProducer(Throwable throwable) {
-        if (throwable == null) return false;
-
-        Throwable cause = throwable;
-        while (cause != null) {
-            String name = cause.getClass().getSimpleName();
-            if (cause instanceof TimeoutException ||
-                name.contains("NetworkException") ||
-                name.contains("DisconnectException") ||
-                name.contains("TimeoutException")) {
-                return true;
-            }
-            cause = cause.getCause();
-        }
-        return false;
-    }
-
-    // Rate-limit producer resets - returns true if reset should proceed
-    private boolean tryReset() {
-        long now = System.currentTimeMillis();
-        long last = lastResetTime.get();
-
-        if (now - last < MIN_RESET_INTERVAL_MS) {
-            log.debug("Skipping reset - {}ms since last reset (cooldown: {}ms)", 
-                    now - last, MIN_RESET_INTERVAL_MS);
-            return false;
-        }
-
-        return lastResetTime.compareAndSet(last, now);
-    }
-
-    // Reset the producer to force a new connection
-    private void resetProducer() {
-        if (producerFactory == null) {
-            log.warn("Producer factory is null, cannot reset");
-            return;
-        }
-
-        log.warn("Resetting Kafka producer due to connection/timeout error");
-        try {
-            producerFactory.reset();
-            log.info("Kafka producer reset successfully");
-        } catch (Exception e) {
-            log.error("Failed to reset Kafka producer", e);
-            // Reset timestamp so next attempt can try again
-            lastResetTime.set(0L);
-        }
-    }
-
-    /**
-     * Async Kafka producer handler
-     */
-    @Bean
-    public KafkaProducerMessageHandler<String, SolaceSyslogEvent> kafkaMessageHandler() {
-        KafkaProducerMessageHandler<String, SolaceSyslogEvent> handler =
-                new KafkaProducerMessageHandler<>(kafkaTemplate());
-        handler.setTopicExpression(new LiteralExpression(kafkaConfig.getTopic()));
-        handler.setMessageKeyExpression(new LiteralExpression(APP_NAME));
-        handler.setSendFailureChannel(producerErrorChannel());
-        handler.setSync(false);
-        return handler;
-    }
-
-    @Bean
-    public KafkaTemplate<String, SolaceSyslogEvent> kafkaTemplate() {
-        return new KafkaTemplate<>(producerFactory());
-    }
-
-    @Bean
-    public ProducerFactory<String, SolaceSyslogEvent> producerFactory() {
-        this.producerFactory = new DefaultKafkaProducerFactory<>(producerConfigs());
-        return this.producerFactory;
-    }
-
-    @Bean
-    public Map<String, Object> producerConfigs() {
-        Map<String, Object> props = new HashMap<>();
-
-        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, kafkaConfig.getBrokers());
-        props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
-                org.apache.kafka.common.serialization.StringSerializer.class);
-        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
-
-        // Timeouts
-        props.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG,
-                kafkaConfig.getRequestTimeoutMs() != null ? kafkaConfig.getRequestTimeoutMs() : 30_000);
-        props.put(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG,
-                kafkaConfig.getDeliveryTimeoutMs() != null ? kafkaConfig.getDeliveryTimeoutMs() : 120_000);
-        props.put(ProducerConfig.MAX_BLOCK_MS_CONFIG,
-                kafkaConfig.getMaxBlockMs() != null ? kafkaConfig.getMaxBlockMs() : 60_000);
-
-        // Retries & backoff (Kafka client level)
-        props.put(ProducerConfig.RETRIES_CONFIG,
-                kafkaConfig.getMaxRetries() != null ? kafkaConfig.getMaxRetries() : Integer.MAX_VALUE);
-        props.put(ProducerConfig.RETRY_BACKOFF_MS_CONFIG,
-                kafkaConfig.getRetryBackoffMs() != null ? kafkaConfig.getRetryBackoffMs() : 1_000);
-
-        // Batching & compression
-        props.put(ProducerConfig.LINGER_MS_CONFIG,
-                kafkaConfig.getLingerMs() != null ? kafkaConfig.getLingerMs() : 100);
-        props.put(ProducerConfig.BATCH_SIZE_CONFIG,
-                kafkaConfig.getBatchSize() != null ? kafkaConfig.getBatchSize() : 32 * 1024);
-        props.put(ProducerConfig.COMPRESSION_TYPE_CONFIG,
-                StringUtils.hasText(kafkaConfig.getCompressionType())
-                        ? kafkaConfig.getCompressionType() : "snappy");
-        props.put(ProducerConfig.BUFFER_MEMORY_CONFIG,
-                kafkaConfig.getBufferMemory() != null ? kafkaConfig.getBufferMemory() : 64L * 1024 * 1024);
-
-        // Reliability
-        props.put(ProducerConfig.ACKS_CONFIG,
-                StringUtils.hasText(kafkaConfig.getAcks()) ? kafkaConfig.getAcks() : "all");
-        props.put(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION,
-                kafkaConfig.getMaxInFlightRequests() != null ? kafkaConfig.getMaxInFlightRequests() : 1);
-        props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
-
-        // SSL (optional)
-        if (Boolean.TRUE.equals(kafkaConfig.getSslEnabled())) {
-            props.put("security.protocol", kafkaConfig.getSecurityProtocol());
-            props.put(SslConfigs.SSL_TRUSTSTORE_LOCATION_CONFIG, kafkaConfig.getSslTruststoreLocation());
-            props.put(SslConfigs.SSL_TRUSTSTORE_PASSWORD_CONFIG, kafkaConfig.getSslTruststorePassword());
-        }
-
-        return props;
-    }
+    /* =========================
+     * Testing
+     * ========================= */
+    testImplementation("org.springframework.boot:spring-boot-starter-test")
 }
