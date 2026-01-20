@@ -1,112 +1,19 @@
 package com.example.syslog.flow;
 
-import io.opentelemetry.api.OpenTelemetry;
-import io.opentelemetry.api.common.AttributeKey;
-import io.opentelemetry.api.common.Attributes;
-import io.opentelemetry.api.logs.Logger;
-import io.opentelemetry.api.logs.Severity;
-import io.opentelemetry.exporter.otlp.logs.OtlpHttpLogRecordExporter;
-import io.opentelemetry.sdk.OpenTelemetrySdk;
-import io.opentelemetry.sdk.logs.SdkLoggerProvider;
-import io.opentelemetry.sdk.logs.export.BatchLogRecordProcessor;
-import io.opentelemetry.sdk.resources.Resource;
-import io.opentelemetry.semconv.ResourceAttributes;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Profile;
-import org.springframework.integration.dsl.IntegrationFlow;
-import org.springframework.integration.dsl.IntegrationFlows;
-import org.springframework.messaging.Message;
-import org.springframework.messaging.MessageChannel;
+import lombok.Data;
+import org.springframework.boot.context.properties.ConfigurationProperties;
 
-import java.time.Duration;
-import java.util.concurrent.TimeUnit;
+@Data
+@ConfigurationProperties(prefix = "otel.client")
+public class OtelClientConfig {
+    private String endpoint = "http://my-otel-collector:4318/v1/logs";
 
-@Slf4j
-@Configuration
-@Profile("otel")
-@RequiredArgsConstructor
-public class OutboundFlowOtelConfig {
+    private String serviceNamespace = "default";
+    private String serviceVersion = "1.0.0";
 
-    private static final String SERVICE_NAME = "syslog-collector";
-    private static final String SCOPE_NAME = "syslog-collector.outbound";
-
-    private final OtelClientConfig otel; // create @ConfigurationProperties("otel.client")
-
-    /**
-     * producerChannel -> emit OTEL LogRecord (OTLP exporter does encoding/retry/batch).
-     */
-    @Bean
-    public IntegrationFlow otelOutboundFlow(@Qualifier("producerChannel") MessageChannel producerChannel,
-                                           Logger otelLogger) {
-        return IntegrationFlows.from(producerChannel)
-                .handle(Message.class, (msg, headers) -> {
-                    Object payload = msg.getPayload();
-                    String json = (payload instanceof String s) ? s : String.valueOf(payload);
-
-                    // Minimal attributes; add what you need (vpn/router/facility/etc)
-                    Attributes attrs = Attributes.builder()
-                            .put(AttributeKey.stringKey("source"), "solace-syslog")
-                            .put(AttributeKey.stringKey("format"), "json")
-                            .build();
-
-                    otelLogger.logRecordBuilder()
-                            .setSeverity(Severity.INFO)     // map severity if you have it
-                            .setBody(json)                  // your existing JSON string
-                            .setAllAttributes(attrs)
-                            .emit();
-
-                    return null;
-                })
-                .get();
-    }
-
-    // ---------- OTEL SDK wiring (logs) ----------
-
-    @Bean(destroyMethod = "shutdown")
-    public OpenTelemetrySdk openTelemetrySdk(SdkLoggerProvider loggerProvider) {
-        return OpenTelemetrySdk.builder()
-                .setLoggerProvider(loggerProvider)
-                .build();
-    }
-
-    @Bean(destroyMethod = "close")
-    public SdkLoggerProvider sdkLoggerProvider(OtlpHttpLogRecordExporter exporter) {
-        Resource resource = Resource.getDefault().merge(
-                Resource.builder()
-                        .put(ResourceAttributes.SERVICE_NAME, SERVICE_NAME)
-                        .put(ResourceAttributes.SERVICE_NAMESPACE, otel.getServiceNamespace())
-                        .put(ResourceAttributes.SERVICE_VERSION, otel.getServiceVersion())
-                        .build()
-        );
-
-        BatchLogRecordProcessor processor = BatchLogRecordProcessor.builder(exporter)
-                .setMaxQueueSize(otel.getMaxQueueSize())
-                .setMaxExportBatchSize(otel.getMaxExportBatchSize())
-                .setScheduleDelay(otel.getScheduleDelayMs(), TimeUnit.MILLISECONDS)
-                .setExporterTimeout(otel.getExporterTimeoutMs(), TimeUnit.MILLISECONDS)
-                .build();
-
-        return SdkLoggerProvider.builder()
-                .setResource(resource)
-                .addLogRecordProcessor(processor)
-                .build();
-    }
-
-    @Bean
-    public OtlpHttpLogRecordExporter otlpHttpLogRecordExporter() {
-        // Your collector service in same namespace (Helm): http://my-otel-collector:4318/v1/logs
-        return OtlpHttpLogRecordExporter.builder()
-                .setEndpoint(otel.getEndpoint())
-                .setTimeout(Duration.ofMillis(otel.getHttpTimeoutMs()))
-                .build();
-    }
-
-    @Bean
-    public Logger otelLogger(OpenTelemetry otelApi) {
-        return otelApi.getLogsBridge().get(SCOPE_NAME);
-    }
+    private int maxQueueSize = 50_000;
+    private int maxExportBatchSize = 2_048;
+    private long scheduleDelayMs = 200;
+    private long exporterTimeoutMs = 10_000;
+    private long httpTimeoutMs = 10_000;
 }
