@@ -1,10 +1,109 @@
-import io.opentelemetry.api.common.Attributes;
-import io.opentelemetry.sdk.resources.Resource;
+package com.example.syslog.flow;
 
-Resource resource = Resource.getDefault().merge(
-    Resource.create(Attributes.builder()
-        .put("service.name", SERVICE_NAME)
-        .put("service.namespace", otel.getServiceNamespace())
-        .put("service.version", otel.getServiceVersion())
-        .build()
-));
+import com.example.syslog.config.OtelClientConfig;
+import io.opentelemetry.sdk.logs.data.LogRecordData;
+import io.opentelemetry.sdk.logs.export.SimpleLogRecordProcessor;
+import io.opentelemetry.sdk.testing.exporter.InMemoryLogRecordExporter;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
+import org.springframework.integration.support.MessageBuilder;
+import org.springframework.messaging.MessageChannel;
+import org.springframework.test.context.ActiveProfiles;
+
+import java.util.List;
+import java.util.concurrent.TimeUnit;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
+
+/**
+ * Integration test for OutboundFlowOtelConfig.
+ * Tests the full Spring Integration flow with OTEL SDK.
+ */
+@SpringBootTest
+@ActiveProfiles("otel")
+class OutboundFlowOtelConfigIntegrationTest {
+
+    @Autowired
+    @Qualifier("producerChannel")
+    private MessageChannel producerChannel;
+
+    @Autowired
+    private InMemoryLogRecordExporter logExporter;
+
+    @TestConfiguration
+    static class TestConfig {
+
+        @Bean
+        @Primary
+        public InMemoryLogRecordExporter inMemoryLogRecordExporter() {
+            return InMemoryLogRecordExporter.create();
+        }
+
+        @Bean
+        @Primary
+        public io.opentelemetry.sdk.logs.export.LogRecordProcessor testLogRecordProcessor(
+                InMemoryLogRecordExporter exporter) {
+            return SimpleLogRecordProcessor.create(exporter);
+        }
+
+        @Bean
+        @Primary
+        public OtelClientConfig otelClientConfig() {
+            OtelClientConfig config = new OtelClientConfig();
+            config.setEndpoint("http://localhost:4318/v1/logs");
+            config.setServiceNamespace("test");
+            config.setServiceVersion("1.0.0");
+            config.setMaxQueueSize(1000);
+            config.setMaxExportBatchSize(100);
+            config.setScheduleDelayMs(50);
+            config.setExporterTimeoutMs(5000);
+            config.setHttpTimeoutMs(5000);
+            return config;
+        }
+    }
+
+    @Test
+    @DisplayName("Should process message through full integration flow")
+    void shouldProcessMessageThroughFlow() {
+        // Given
+        logExporter.reset();
+        String jsonPayload = "{\"timestamp\":\"2024-01-15T10:30:00Z\",\"message\":\"Integration test\"}";
+
+        // When
+        producerChannel.send(MessageBuilder.withPayload(jsonPayload).build());
+
+        // Then - wait for async processing
+        await().atMost(5, TimeUnit.SECONDS).untilAsserted(() -> {
+            List<LogRecordData> logs = logExporter.getFinishedLogRecordItems();
+            assertThat(logs).isNotEmpty();
+            assertThat(logs.get(0).getBody().asString()).isEqualTo(jsonPayload);
+        });
+    }
+
+    @Test
+    @DisplayName("Should handle high throughput")
+    void shouldHandleHighThroughput() {
+        // Given
+        logExporter.reset();
+        int messageCount = 1000;
+
+        // When
+        for (int i = 0; i < messageCount; i++) {
+            String json = "{\"id\":" + i + ",\"message\":\"Message " + i + "\"}";
+            producerChannel.send(MessageBuilder.withPayload(json).build());
+        }
+
+        // Then - wait for all messages to be processed
+        await().atMost(30, TimeUnit.SECONDS).untilAsserted(() -> {
+            List<LogRecordData> logs = logExporter.getFinishedLogRecordItems();
+            assertThat(logs).hasSize(messageCount);
+        });
+    }
+}
