@@ -1,19 +1,8 @@
-package com.example.syslog.flow;
+spring:
+  profiles: otel
 
-import lombok.Data;
-import org.springframework.boot.context.properties.ConfigurationProperties;
-
-@Data
-@ConfigurationProperties(prefix = "otel.client")
-public class OtelClientConfig {
-    private String endpoint = "http://my-otel-collector:4318/v1/logs";
-
-    private String serviceNamespace = "default";
-    private String serviceVersion = "1.0.0";
-
-    private int maxQueueSize = 50_000;
-    private int maxExportBatchSize = 2_048;
-    private long scheduleDelayMs = 200;
-    private long exporterTimeoutMs = 10_000;
-    private long httpTimeoutMs = 10_000;
-}
+otel:
+  client:
+    endpoint: http://my-otel-collector:4318/v1/logs
+    serviceNamespace: ${K8S_NAMESPACE:default}
+    serviceVersion: ${APP_VERSION:1.0.0}
