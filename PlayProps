@@ -1,2 +1,147 @@
-    testImplementation("io.opentelemetry:opentelemetry-sdk-testing")
-    testImplementation("org.awaitility:awaitility:4.2.0")
+package com.example.syslog.flow;
+
+import com.example.syslog.SolaceSyslogCollectorApplication;
+import com.example.syslog.config.OtelClientConfig;
+import io.opentelemetry.api.logs.Logger;
+import io.opentelemetry.sdk.OpenTelemetrySdk;
+import io.opentelemetry.sdk.logs.SdkLoggerProvider;
+import io.opentelemetry.sdk.logs.data.LogRecordData;
+import io.opentelemetry.sdk.logs.export.SimpleLogRecordProcessor;
+import io.opentelemetry.sdk.testing.exporter.InMemoryLogRecordExporter;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
+import org.springframework.integration.support.MessageBuilder;
+import org.springframework.messaging.MessageChannel;
+import org.springframework.test.context.ActiveProfiles;
+
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * Integration test for OutboundFlowOtelConfig.
+ * 
+ * Uses TestConfiguration to replace the real OtlpHttpLogRecordExporter
+ * with InMemoryLogRecordExporter - no network calls.
+ */
+@SpringBootTest(classes = {
+        SolaceSyslogCollectorApplication.class,
+        OutboundFlowOtelConfigIntegrationTest.TestOtelConfig.class
+})
+@ActiveProfiles("otel-test")
+class OutboundFlowOtelConfigIntegrationTest {
+
+    @Autowired
+    @Qualifier("producerChannel")
+    private MessageChannel producerChannel;
+
+    @Autowired
+    private InMemoryLogRecordExporter logExporter;
+
+    @BeforeEach
+    void setUp() {
+        logExporter.reset();
+    }
+
+    @Test
+    @DisplayName("Should process message through full integration flow")
+    void shouldProcessMessageThroughFlow() {
+        // Given
+        String jsonPayload = "{\"timestamp\":\"2024-01-15T10:30:00Z\",\"message\":\"Integration test\"}";
+
+        // When
+        producerChannel.send(MessageBuilder.withPayload(jsonPayload).build());
+
+        // Then
+        List<LogRecordData> logs = logExporter.getFinishedLogRecordItems();
+        assertThat(logs).hasSize(1);
+        assertThat(logs.get(0).getBody().asString()).isEqualTo(jsonPayload);
+    }
+
+    @Test
+    @DisplayName("Should set correct attributes on LogRecord")
+    void shouldSetCorrectAttributes() {
+        // Given
+        String jsonPayload = "{\"test\":\"data\"}";
+
+        // When
+        producerChannel.send(MessageBuilder.withPayload(jsonPayload).build());
+
+        // Then
+        List<LogRecordData> logs = logExporter.getFinishedLogRecordItems();
+        assertThat(logs).hasSize(1);
+
+        var attrs = logs.get(0).getAttributes();
+        assertThat(attrs.get(io.opentelemetry.api.common.AttributeKey.stringKey("source")))
+                .isEqualTo("solace-syslog");
+        assertThat(attrs.get(io.opentelemetry.api.common.AttributeKey.stringKey("format")))
+                .isEqualTo("json");
+    }
+
+    @Test
+    @DisplayName("Should handle multiple messages")
+    void shouldHandleMultipleMessages() {
+        // Given & When
+        for (int i = 0; i < 100; i++) {
+            String json = "{\"id\":" + i + "}";
+            producerChannel.send(MessageBuilder.withPayload(json).build());
+        }
+
+        // Then
+        List<LogRecordData> logs = logExporter.getFinishedLogRecordItems();
+        assertThat(logs).hasSize(100);
+    }
+
+    /**
+     * Test configuration that replaces real OTEL beans with in-memory versions.
+     * This prevents any network calls during tests.
+     */
+    @TestConfiguration
+    static class TestOtelConfig {
+
+        @Bean
+        @Primary
+        public InMemoryLogRecordExporter inMemoryLogRecordExporter() {
+            return InMemoryLogRecordExporter.create();
+        }
+
+        @Bean
+        @Primary
+        public SdkLoggerProvider testSdkLoggerProvider(InMemoryLogRecordExporter exporter) {
+            return SdkLoggerProvider.builder()
+                    .addLogRecordProcessor(SimpleLogRecordProcessor.create(exporter))
+                    .build();
+        }
+
+        @Bean
+        @Primary
+        public OpenTelemetrySdk testOpenTelemetrySdk(SdkLoggerProvider loggerProvider) {
+            return OpenTelemetrySdk.builder()
+                    .setLoggerProvider(loggerProvider)
+                    .build();
+        }
+
+        @Bean
+        @Primary
+        public Logger testOtelLogger(OpenTelemetrySdk openTelemetrySdk) {
+            return openTelemetrySdk.getLogsBridge().get("syslog-collector.outbound.test");
+        }
+
+        @Bean
+        @Primary
+        public OtelClientConfig testOtelClientConfig() {
+            OtelClientConfig config = new OtelClientConfig();
+            config.setEndpoint("http://localhost:4318/v1/logs"); // won't be used
+            config.setServiceNamespace("test");
+            config.setServiceVersion("1.0.0-test");
+            return config;
+        }
+    }
+}
