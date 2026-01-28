@@ -1,2 +1,45 @@
-openssl s_client -connect example.com:443 -servername example.com </dev/null \
-  | openssl x509 -noout -text
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: my-otel-collector-config
+data:
+  otel-collector.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          http:
+            endpoint: 0.0.0.0:4318
+          grpc:
+            endpoint: 0.0.0.0:4317
+
+    processors:
+      memory_limiter:
+        # tune to your pod limits
+        limit_mib: 512
+        spike_limit_mib: 128
+        check_interval: 1s
+
+      batch:
+        timeout: 200ms
+        send_batch_size: 2048
+        send_batch_max_size: 4096
+
+    exporters:
+      kafka:
+        brokers:
+          - ${KAFKA_BROKER_1}
+          - ${KAFKA_BROKER_2}
+        topic: ${KAFKA_TOPIC}
+        encoding: otlp_proto
+        # producer tuning (optional but useful)
+        producer:
+          compression: snappy
+          required_acks: all
+          max_message_bytes: 1048576
+
+    service:
+      pipelines:
+        logs:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [kafka]
