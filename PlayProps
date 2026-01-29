@@ -114,7 +114,7 @@ public class OutboundFlowKafkaConfig {
 
     @Bean
     public MessageChannel producerErrorChannel() {
-        return org.springframework.integration.channel.MessageChannels
+        return org.springframework.integration.dsl.MessageChannels
                 .queue("producerErrorChannel", 1000)
                 .getObject();
     }
