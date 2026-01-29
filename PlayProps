@@ -1,58 +1,130 @@
-receivers:
-  otlp:
-    protocols:
-      grpc:
-        endpoint: 0.0.0.0:4317
-        max_recv_msg_size_mib: 16
-        max_concurrent_streams: 50
+import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.common.errors.TimeoutException;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.integration.channel.MessageChannels;
+import org.springframework.integration.dsl.IntegrationFlow;
+import org.springframework.integration.dsl.Pollers;
+import org.springframework.integration.endpoint.SourcePollingChannelAdapter;
+import org.springframework.integration.handler.advice.AbstractRequestHandlerAdvice;
+import org.springframework.integration.kafka.outbound.KafkaProducerMessageHandler;
+import org.springframework.kafka.core.DefaultKafkaProducerFactory;
+import org.springframework.messaging.Message;
+import org.springframework.messaging.PollableChannel;
+import org.springframework.util.backoff.FixedBackOff;
 
-exporters:
-  kafka:
-    brokers:
-      - nginx-kafka-proxy:9092
-    topic: solace-syslog
-    encoding: raw
-    producer:
-      max_message_bytes: 1048576
-      required_acks: 1          # acks=all would be safer but slower
-      compression: lz4          # better for high throughput than snappy
-      flush_max_messages: 1000
-    retry_on_failure:
-      enabled: true
-      initial_interval: 500ms
-      max_interval: 30s
-      max_elapsed_time: 10m     # keep retrying during outages
-    sending_queue:
-      enabled: true
-      num_consumers: 20         # parallel senders to Kafka
-      queue_size: 50000         # ~50k messages buffer
-      storage: file_storage     # persist queue to disk
-    timeout: 60s
+import java.util.concurrent.atomic.AtomicLong;
 
-extensions:
-  file_storage:
-    directory: /var/otel/queue
-    timeout: 10s
-    compaction:
-      on_start: true
-      on_rebound: true
-      directory: /var/otel/queue/tmp
+@Slf4j
+@Configuration
+public class OutboundFlowKafkaConfig {
 
-processors:
-  batch:
-    send_batch_size: 1000
-    send_batch_max_size: 2000
-    timeout: 2s
-  
-  memory_limiter:
-    check_interval: 500ms
-    limit_mib: 1024
-    spike_limit_mib: 256
+    private static final long MIN_RESET_INTERVAL_MS = 10_000;
+    private final AtomicLong lastResetTime = new AtomicLong(0);
 
-service:
-  extensions: [file_storage]
-  pipelines:
-    logs:
-      receivers: [otlp]
-      processors: [memory_limiter, batch]
-      exporters: [kafka]
+    private final DefaultKafkaProducerFactory<String, String> producerFactory;
+
+    public OutboundFlowKafkaConfig(DefaultKafkaProducerFactory<String, String> producerFactory) {
+        this.producerFactory = producerFactory;
+    }
+
+    @Bean
+    public PollableChannel producerChannel() {
+        return MessageChannels.queue("producerChannel", 10_000).getObject();
+    }
+
+    /**
+     * Poller reads from QueueChannel. If Kafka fails, we stop this poller -> queue stops draining -> backpressure.
+     */
+    @Bean
+    public IntegrationFlow kafkaOutboundFlow(
+            @Qualifier("producerChannel") PollableChannel producerChannel,
+            KafkaProducerMessageHandler<String, String> kafkaHandler,
+            StopOnKafkaFailureAdvice stopOnKafkaFailureAdvice
+    ) {
+        return IntegrationFlow
+                .from(producerChannel, c -> c.poller(Pollers.fixedDelay(0)
+                        .maxMessagesPerPoll(100)         // tune
+                        .receiveTimeout(1000)            // tune
+                        .errorChannel("kafkaPollerErrorChannel")))
+                .handle(kafkaHandler, e -> e.advice(stopOnKafkaFailureAdvice))
+                .get();
+    }
+
+    /**
+     * Advice that:
+     * - executes send
+     * - on failure: rate-limited producer reset (for timeout/network errors)
+     * - stops the poller to enforce blocking policy
+     */
+    @Bean
+    public StopOnKafkaFailureAdvice stopOnKafkaFailureAdvice(
+            @Qualifier("kafkaOutboundFlow.source") SourcePollingChannelAdapter poller
+    ) {
+        return new StopOnKafkaFailureAdvice(poller, this::maybeResetProducer);
+    }
+
+    private void maybeResetProducer(Throwable t) {
+        if (!shouldResetProducer(t)) return;
+
+        long now = System.currentTimeMillis();
+        long last = lastResetTime.get();
+        if (now - last < MIN_RESET_INTERVAL_MS) return;
+        if (!lastResetTime.compareAndSet(last, now)) return;
+
+        try {
+            log.warn("Resetting Kafka producer due to {}", t.toString());
+            producerFactory.reset();
+        } catch (Exception e) {
+            log.error("Producer reset failed", e);
+        }
+    }
+
+    private boolean shouldResetProducer(Throwable t) {
+        if (t == null) return false;
+        Throwable c = t;
+        while (c != null) {
+            String name = c.getClass().getSimpleName();
+            if (c instanceof TimeoutException
+                    || name.contains("Timeout")
+                    || name.contains("Network")
+                    || name.contains("Disconnect")) {
+                return true;
+            }
+            c = c.getCause();
+        }
+        return false;
+    }
+
+    /**
+     * AOP-style advice around Kafka handler.
+     */
+    public static class StopOnKafkaFailureAdvice extends AbstractRequestHandlerAdvice {
+
+        private final SourcePollingChannelAdapter poller;
+        private final java.util.function.Consumer<Throwable> resetFn;
+
+        public StopOnKafkaFailureAdvice(SourcePollingChannelAdapter poller,
+                                        java.util.function.Consumer<Throwable> resetFn) {
+            this.poller = poller;
+            this.resetFn = resetFn;
+        }
+
+        @Override
+        protected Object doInvoke(ExecutionCallback callback, Object target, Message<?> message) throws Exception {
+            try {
+                return callback.execute();
+            } catch (Exception e) {
+                resetFn.accept(e);
+
+                // Stop poller => stop draining QueueChannel => backpressure
+                if (poller.isRunning()) {
+                    log.error("Kafka send failed. Stopping poller to enforce BLOCK policy. error={}", e.toString());
+                    poller.stop();
+                }
+                throw e;
+            }
+        }
+    }
+}
