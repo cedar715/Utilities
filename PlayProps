@@ -79,7 +79,7 @@ public class OutboundFlowKafkaConfig {
     ) {
         return IntegrationFlow.from(producerChannel)
                 .handle(kafkaMessageHandler,
-                        (GenericEndpointSpec<KafkaProducerMessageHandler<String, SolaceSyslogEvent>> e) ->
+                        e ->
                                 e.advice(kafkaRetryAdvice))
                 .get();
     }
@@ -89,7 +89,7 @@ public class OutboundFlowKafkaConfig {
             @Qualifier("producerErrorChannel") MessageChannel errorChannel
     ) {
         return IntegrationFlow.from(errorChannel)
-                .log(LoggingHandler.Level.ERROR, "KafkaErrorLogger", (Message<?> m) -> {
+                .log(LoggingHandler.Level.ERROR, "KafkaErrorLogger", m -> {
                     Object payload = m.getPayload();
                     Throwable cause = null;
 
@@ -134,7 +134,7 @@ public class OutboundFlowKafkaConfig {
         advice.setRetryTemplate(template);
 
         // Reset producer after exhausting retries
-        advice.setRecoveryCallback((RetryContext ctx) -> {
+        advice.setRecoveryCallback(ctx -> {
             Throwable lastError = ctx.getLastThrowable();
 
             // Reset producer if it's a timeout/connection error
