@@ -1,1 +1,29 @@
+@Bean
+public RequestHandlerRetryAdvice kafkaRetryAdvice() {
+    RequestHandlerRetryAdvice advice = new RequestHandlerRetryAdvice();
+    advice.setRetryTemplate(kafkaRetryTemplate());
 
+    advice.setRecoveryCallback(ctx -> {
+        Message<?> failed = (Message<?>) ctx.getAttribute("message");
+        Throwable lastThrowable = ctx.getLastThrowable();
+
+        if (failed != null) {
+            // Enrich headers with retry + exception context
+            Message<?> enriched = MessageBuilder
+                    .fromMessage(failed)
+                    .setHeader("si.retry.exhausted", true)
+                    .setHeader("si.retry.attempts", ctx.getRetryCount())
+                    .setHeader("si.retry.exception",
+                               lastThrowable != null ? lastThrowable.getClass().getName() : "unknown")
+                    .build();
+
+            // Send to error channel for centralized handling (DLQ, alerts, etc.)
+            producerErrorChannel().send(enriched);
+        }
+
+        // IMPORTANT: return null so the flow stops here (no resend to main channel)
+        return null;
+    });
+
+    return advice;
+}
