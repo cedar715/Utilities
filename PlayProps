@@ -1,8 +1,3 @@
-<rpc>
-  <show>
-    <client>
-      <username>myUsername</username>
-      <detail></detail>
-    </client>
-  </show>
-</rpc>
+curl -u admin:admin -X POST \
+  -d '<rpc><show><client-profile><name>standard-profile</name><vpn-name>default</vpn-name><detail/></client-profile></show></rpc>' \
+  https://your-broker:943/SEMP
