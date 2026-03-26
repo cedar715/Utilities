@@ -1,3 +1,4 @@
-curl -u admin:admin -X POST \
-  -d '<rpc><show><client-profile><name>standard-profile</name><vpn-name>default</vpn-name><detail/></client-profile></show></rpc>' \
-  https://your-broker:943/SEMP
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://grafana-prod.yourcompany.com/api/v1/provisioning/alert-rules" | \
+  jq '[.[] | select(.folderUID == "YOUR_FOLDER_UID")]' \
+  > alert-rules-filtered.json
