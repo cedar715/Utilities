@@ -1,4 +1,9 @@
-curl -H "Authorization: Bearer $TOKEN" \
-  "https://grafana-prod.yourcompany.com/api/v1/provisioning/alert-rules" | \
-  jq '[.[] | select(.folderUID == "YOUR_FOLDER_UID")]' \
-  > alert-rules-filtered.json
+GRAFANA_NONPROD="https://grafana-nonprod.yourcompany.com"
+TOKEN_NP="your-nonprod-token"
+
+curl -X POST \
+  -H "Authorization: Bearer $TOKEN_NP" \
+  -H "Content-Type: application/json" \
+  -H "X-Disable-Provenance: true" \
+  -d @alert-rules-filtered.json \
+  "$GRAFANA_NONPROD/api/v1/provisioning/alert-rules"
