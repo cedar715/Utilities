@@ -1,45 +1,47 @@
 Hello Solace Support Team,
 
-We would like your guidance on the best supported approach for our Solace PR/DR setup.
+We would like your guidance on the best supported approach for a phased Solace PR/DR rollout.
 
-Our current situation is as follows:
+**Our Situation:**
 
-* We are deploying Solace HA in both PR and DR.
-* The PR site is ready now.
-* The final DR site will not be ready for approximately 6 months.
-* For regulatory reasons, we cannot go live with PR alone.
-* To meet the timeline, we are considering deploying an interim DR setup in another available data center.
+- Deploying Solace HA in both PR and DR.
+- PR site is ready now; final DR site will not be ready for ~6 months.
+- Regulatory constraint: cannot go live with PR alone.
+- Environment context: we currently operate 6 Solace HA kits (18 brokers) in production, broker version 10.11.1.167, monitored via SEMP v2, Prometheus, and Grafana.
 
-Our proposed approach:
+**Proposed Approach:**
 
-* Deploy PR HA in the final PR site now.
-* Deploy an interim DR setup in a temporary DC.
-* Enable replication between PR and this interim DR site.
-* Client applications will be configured with both PR and DR endpoints using DNS-based FQDNs.
-* The DR endpoint presented to clients will remain DNS-based, and later we plan to switch DNS from the interim DR site to the final DR site, with a controlled TTL strategy.
-* Once the final DR site is ready, we will migrate/cut over from the interim DR site to the final DR site. The cutover/migration window itself may take 3–7 days.
+- Deploy PR HA at the final PR site now.
+- Deploy an interim DR setup in a temporary DC, with replication enabled from PR.
+- Clients configured with both PR and DR endpoints using DNS-based FQDNs.
+- When the final DR site is ready in ~6 months, migrate from interim DR to final DR. Cutover window: 3-7 days.
+- DNS flip (with pre-lowered TTL) will redirect the DR FQDN from interim DR to final DR.
 
-We would appreciate your recommendation on the following:
+**Questions:**
 
-1. For an interim DR period of about 6 months, would you recommend a full HA deployment at the interim DR site, or would a standalone broker be acceptable?
-2. Is this interim DR approach supported from a Solace perspective?
-3. When we move from the interim DR site to the final DR site, what is the recommended Solace procedure?
-4. Do you recommend that we disable Message VPN replication during the migration from interim DR to final DR?
-5. If replication must be disabled, what precautions should we take regarding:
+1. **Interim DR sizing:** For a ~6 month interim period, do you recommend a full HA triplet at the interim DR site, or is a standalone broker acceptable? Any licensing or support considerations for the interim deployment?
 
-   * replication queues
-   * enqueued guaranteed messages
-   * replication bridge objects
-   * Config-Sync
-6. Are there any specific considerations for Guaranteed VPN Bridges during this migration? Would any bridge queues need to be removed and re-added?
-7. Since client endpoints are DNS-based and we plan to switch the DR FQDN from the interim DR site to the final DR site, does this simplify only the client connectivity side, or can the same DNS-based approach also help reduce Solace-side reconfiguration for replication/config-sync?
-8. Are there any best practices or caveats around DNS, certificates, broker identities, or internal connectivity that we should account for in this design?
+2. **Supportability:** Is this interim-then-migrate approach a supported pattern from Solace's perspective?
 
-Our main objective is to implement a compliant and supportable interim DR solution now, and then transition cleanly to the final DR site with minimal risk and no unexpected impact to replication, bridges, or guaranteed messaging.
+3. **Migration procedure:** What is the recommended Solace procedure to cut over from interim DR to final DR? Specifically, we would like guidance on:
+   - The correct sequence for disabling replication, reconfiguring the mate, and re-enabling replication
+   - Handling of replication queues, in-flight guaranteed messages, and replication bridge objects during the cutover
+   - Config-Sync behavior during and after the migration
+   - Any special handling for Guaranteed VPN Bridges (do bridge queues need to be removed and re-added?)
 
-We would appreciate your recommended architecture and migration guidance.
+4. **DNS-based addressing:** We plan to use FQDNs (not IPs) for both client endpoints and replication mate configuration. Does this reduce Solace-side reconfiguration during the migration, or are there specific broker-side config changes that cannot be avoided via DNS?
+
+5. **Client library DNS behavior:** For Solace JCSMP/JMS/PAHO clients using FQDN-based endpoints, how is DNS resolution handled - at connect time, per reconnect, or with internal caching? This affects our TTL strategy.
+
+6. **Broker-side FQDN caveats:** Any considerations for using FQDNs in replication mate or bridge configuration (DNS resolution frequency on the broker, TLS certificate SAN requirements, etc.)?
+
+7. **Rollback:** If the migration to final DR has issues, what is the cleanest procedure to revert to the interim DR site temporarily?
+
+8. **Version-specific:** Any known issues in broker version 10.11.1.167 relevant to long-running replication or DR site migrations?
+
+Our objective is a compliant, supportable interim DR solution now, with a clean transition to the final DR site later without impact to replication, bridges, or guaranteed messaging.
+
+Given the design impact, we would appreciate your written recommendations, and are happy to set up a call if a discussion would be more efficient.
 
 Regards,
-[Your Name]
-[Team / Organization]
-[Contact Details]
+Jai
