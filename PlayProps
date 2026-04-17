@@ -1,9 +1,45 @@
-GRAFANA_NONPROD="https://grafana-nonprod.yourcompany.com"
-TOKEN_NP="your-nonprod-token"
+Hello Solace Support Team,
 
-curl -X POST \
-  -H "Authorization: Bearer $TOKEN_NP" \
-  -H "Content-Type: application/json" \
-  -H "X-Disable-Provenance: true" \
-  -d @alert-rules-filtered.json \
-  "$GRAFANA_NONPROD/api/v1/provisioning/alert-rules"
+We would like your guidance on the best supported approach for our Solace PR/DR setup.
+
+Our current situation is as follows:
+
+* We are deploying Solace HA in both PR and DR.
+* The PR site is ready now.
+* The final DR site will not be ready for approximately 6 months.
+* For regulatory reasons, we cannot go live with PR alone.
+* To meet the timeline, we are considering deploying an interim DR setup in another available data center.
+
+Our proposed approach:
+
+* Deploy PR HA in the final PR site now.
+* Deploy an interim DR setup in a temporary DC.
+* Enable replication between PR and this interim DR site.
+* Client applications will be configured with both PR and DR endpoints using DNS-based FQDNs.
+* The DR endpoint presented to clients will remain DNS-based, and later we plan to switch DNS from the interim DR site to the final DR site, with a controlled TTL strategy.
+* Once the final DR site is ready, we will migrate/cut over from the interim DR site to the final DR site. The cutover/migration window itself may take 3–7 days.
+
+We would appreciate your recommendation on the following:
+
+1. For an interim DR period of about 6 months, would you recommend a full HA deployment at the interim DR site, or would a standalone broker be acceptable?
+2. Is this interim DR approach supported from a Solace perspective?
+3. When we move from the interim DR site to the final DR site, what is the recommended Solace procedure?
+4. Do you recommend that we disable Message VPN replication during the migration from interim DR to final DR?
+5. If replication must be disabled, what precautions should we take regarding:
+
+   * replication queues
+   * enqueued guaranteed messages
+   * replication bridge objects
+   * Config-Sync
+6. Are there any specific considerations for Guaranteed VPN Bridges during this migration? Would any bridge queues need to be removed and re-added?
+7. Since client endpoints are DNS-based and we plan to switch the DR FQDN from the interim DR site to the final DR site, does this simplify only the client connectivity side, or can the same DNS-based approach also help reduce Solace-side reconfiguration for replication/config-sync?
+8. Are there any best practices or caveats around DNS, certificates, broker identities, or internal connectivity that we should account for in this design?
+
+Our main objective is to implement a compliant and supportable interim DR solution now, and then transition cleanly to the final DR site with minimal risk and no unexpected impact to replication, bridges, or guaranteed messaging.
+
+We would appreciate your recommended architecture and migration guidance.
+
+Regards,
+[Your Name]
+[Team / Organization]
+[Contact Details]
