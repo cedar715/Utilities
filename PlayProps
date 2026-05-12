@@ -1,11 +1,296 @@
-What changed and why it fixes the freeze:
-The gauge is registered once per name+tags. Micrometer caches it and calls its supplier on every Prometheus scrape. The supplier is h -> h.get().applyAsDouble(null) — it reads through the AtomicReference, so whatever function you last handed to registerOrUpdate is the one that runs on the next scrape. No remove. No gap. No race between scrape and re-registration.
-One thing to check in your GaugeConfig: the cast assumes getFunction() returns something that can be invoked without an instance argument (the typical Solace SEMP case — your function closes over the queue/client it's reading). If getFunction() is Supplier<Number> or DoubleSupplier, adjust the holder type accordingly:
-java// If getFunction() returns Supplier<Number>:
-private final ConcurrentHashMap<String, AtomicReference<Supplier<Number>>> suppliers = ...;
-Gauge.builder(metricName, holder, h -> h.get().get().doubleValue())
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Tag;
+import io.micrometer.core.instrument.Tags;
 
-// If getFunction() returns DoubleSupplier:
-private final ConcurrentHashMap<String, AtomicReference<DoubleSupplier>> suppliers = ...;
-Gauge.builder(metricName, holder, h -> h.get().getAsDouble())
-One catch worth being explicit about: if gaugeConfig.getFunction() itself closes over a stale reference (for example, it captured an old QueueInfo object from a previous SEMP poll), this pattern still goes stale — because you'd be swapping in a new closure each time, which works, but only if your refresh code is actually building a new GaugeConfig with a freshly-bound function each cycle. If instead the SEMP refresh updates fields on a long-lived object and getFunction() reads those fields, you don't even need the swap — the closure picks up the new values automatically. Worth tracing one gauge end-to-end to confirm where the staleness enters. The most common cause in Solace observability code is that the function captures a value (final long depth = info.getDepth()) instead of capturing the source (() -> info.getDepth()). If that's the bug, the supplier holder above masks it but the cleanest fix is in the function definition itself.
+import javax.annotation.PostConstruct;
+import javax.annotation.PreDestroy;
+import javax.inject.Inject;
+import java.util.AbstractMap;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
+import java.util.stream.Collectors;
+
+import lombok.extern.slf4j.Slf4j;
+
+import org.springframework.beans.factory.annotation.Value;
+
+@Slf4j
+@Component("msgs_age")
+public class QueueMsgsAgeCollector extends AbstractSolaceMetricsCollector<List<QueueType>> {
+
+    private static final String SYSTEM_VPN_PREFIX = "#CFGSYN";
+
+    /** Per-future timeout. A slow broker on one queue must not stall the whole scrape. */
+    private static final long PER_QUEUE_TIMEOUT_SECONDS = 5;
+
+    /** Overall budget for the parallel fetch batch. Must stay well under Prometheus scrape_timeout. */
+    private static final long BATCH_TIMEOUT_SECONDS = 20;
+
+    private final QueueStatsCollector queueStatsCollector;
+    private final CacheConfig cacheConfig;
+    private final QueueOldestMsgAgeService queueOldestMsgAgeService;
+
+    /**
+     * Maximum number of concurrent SEMPv2 calls issued per scrape.
+     * Increasing this reduces wall-time but raises broker CPU load.
+     * Tune via {@code msgs-age.max-concurrent-semp-calls} (default: 10).
+     * Wall-time ≈ ceil(N / max-concurrent-semp-calls) × avg-call-latency
+     */
+    @Value("${msgs-age.max-concurrent-semp-calls:10}")
+    private int maxConcurrentSempCalls;
+
+    /**
+     * Long-lived executor. Created once at startup, shut down at app stop.
+     * Previously a new pool was created per scrape — wasteful thread churn.
+     */
+    private ExecutorService executor;
+
+    /**
+     * Long-lived value holders keyed by tag set. The supplier registered with Micrometer
+     * reads {@code AtomicLong::get} on every scrape, so updating the AtomicLong in place
+     * makes Grafana see fresh data without any gauge remove/re-register dance.
+     * This is the core fix for the "frozen value" symptom.
+     */
+    private final Map<Tags, AtomicLong> ageHolders = new ConcurrentHashMap<>();
+
+    @Inject
+    QueueMsgsAgeCollector(final QueueStatsCollector queueStatsCollector,
+                          final CacheConfig cacheConfig,
+                          final QueueOldestMsgAgeService queueOldestMsgAgeService) {
+        this.queueStatsCollector = queueStatsCollector;
+        this.cacheConfig = cacheConfig;
+        this.queueOldestMsgAgeService = queueOldestMsgAgeService;
+    }
+
+    @PostConstruct
+    void init() {
+        // Shared pool sized to the configured concurrency. One pool for the lifetime of the app.
+        this.executor = Executors.newFixedThreadPool(Math.max(1, maxConcurrentSempCalls));
+    }
+
+    @PreDestroy
+    void shutdown() {
+        if (executor != null) {
+            executor.shutdown();
+            try {
+                if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
+                    executor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                executor.shutdownNow();
+            }
+        }
+    }
+
+    @Override
+    public List<QueueType> collect(final String routerAlias) {
+        return queueStatsCollector.getQueueMsgsAge(routerAlias);
+    }
+
+    public List<QueueType> register(final CollectorCommand collectorCommand) {
+        final List<QueueType> queueStats = collect(collectorCommand.getSolaceRouterAlias());
+        register(queueStats, collectorCommand.getMeterRegistry(), collectorCommand.getSolaceRouterAlias());
+        return queueStats;
+    }
+
+    public void register(final List<QueueType> queueStats,
+                         final MeterRegistry solaceMeterRegistry,
+                         final String routerAlias) {
+
+        // ---- 1. Filter to eligible queues (have info, have VPN, not a system VPN) ----
+        final List<QueueType> queuesForAgeCheck = filterEligible(queueStats);
+
+        // ---- 2. Partition into non-empty (need broker call) and empty (age = 0) ----
+        final Partitioned partitioned = partition(queuesForAgeCheck);
+
+        log.debug("[{}] Pre-fetching oldest msg age for {}/{} non-empty queues, "
+                  + "skipping {} empty queues (max {} concurrent SEMPv2 calls)",
+                  routerAlias,
+                  partitioned.nonEmpty.size(),
+                  queuesForAgeCheck.size(),
+                  partitioned.empty.size(),
+                  maxConcurrentSempCalls);
+
+        // ---- 3. Parallel pre-fetch ages for non-empty queues (with timeouts + error isolation) ----
+        // All SEMPv2 calls fire NOW, before gauges are registered, so Micrometer's scrape
+        // path only reads pre-computed longs. Per-future timeout protects against a hung
+        // broker; per-future exception handling means one bad queue does not blank the rest.
+        final Map<Tags, Long> ageMap = fetchAgesInParallel(partitioned.nonEmpty, routerAlias);
+
+        // ---- 4. Empty queues get age = 0 with no broker call ----
+        // Also ensures queues that drained since last scrape report 0, not a stale value.
+        partitioned.empty.forEach(qt -> ageMap.put(createQueueTags(qt), 0L));
+
+        // ---- 5. Push values into the long-lived AtomicLong holders ----
+        // Gauges read these holders on every scrape. Updating in place avoids the
+        // freeze-on-re-registration trap and avoids scrape-window gaps.
+        updateHolders(ageMap);
+
+        // ---- 6. Register gauges (idempotent — only adds new ones) ----
+        registerGaugesIfAbsent(solaceMeterRegistry);
+    }
+
+    // -----------------------------------------------------------------------
+    // Filtering / partitioning
+    // -----------------------------------------------------------------------
+
+    private List<QueueType> filterEligible(final List<QueueType> queueStats) {
+        return queueStats.stream()
+                .filter(qt -> qt.getInfo() != null
+                              && qt.getInfo().getMessageVpn() != null
+                              && !qt.getInfo().getMessageVpn().startsWith(SYSTEM_VPN_PREFIX))
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Splits queues by spool depth:
+     *  - non-empty: numMessagesSpooled > 0  → needs a SEMPv2 call to get oldest msg age
+     *  - empty:     numMessagesSpooled == 0 → age is trivially 0, no broker call needed
+     *
+     * Queues where numMessagesSpooled is null are SKIPPED entirely. Null means
+     * "broker did not report this field" — not the same as zero. Reporting 0 for
+     * an unknown value would silently mask broker/SEMP issues.
+     */
+    private Partitioned partition(final List<QueueType> queues) {
+        final List<QueueType> nonEmpty = queues.stream()
+                .filter(qt -> qt.getInfo().getNumMessagesSpooled() != null
+                              && qt.getInfo().getNumMessagesSpooled().longValue() > 0)
+                .collect(Collectors.toList());
+
+        final List<QueueType> empty = queues.stream()
+                .filter(qt -> qt.getInfo().getNumMessagesSpooled() != null
+                              && qt.getInfo().getNumMessagesSpooled().longValue() == 0)
+                .collect(Collectors.toList());
+
+        final long unknown = queues.size() - nonEmpty.size() - empty.size();
+        if (unknown > 0) {
+            log.warn("Skipped {} queues with null numMessagesSpooled (broker did not report depth)",
+                     unknown);
+        }
+        return new Partitioned(nonEmpty, empty);
+    }
+
+    // -----------------------------------------------------------------------
+    // Parallel SEMPv2 fetch
+    // -----------------------------------------------------------------------
+
+    private Map<Tags, Long> fetchAgesInParallel(final List<QueueType> nonEmptyQueues,
+                                                final String routerAlias) {
+        if (nonEmptyQueues.isEmpty()) {
+            // Avoid creating futures and waiting on an empty batch.
+            return new HashMap<>();
+        }
+
+        final List<CompletableFuture<AbstractMap.SimpleEntry<Tags, Long>>> futures =
+                nonEmptyQueues.stream()
+                        .map(qt -> CompletableFuture
+                                .supplyAsync(() -> fetchOne(qt, routerAlias), executor)
+                                // Per-queue timeout: a single hung SEMPv2 call cannot stall the batch.
+                                .orTimeout(PER_QUEUE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                                // Per-queue error isolation: log and drop, do not propagate.
+                                .exceptionally(ex -> {
+                                    final Throwable cause = (ex instanceof java.util.concurrent.CompletionException
+                                                             && ex.getCause() != null) ? ex.getCause() : ex;
+                                    if (cause instanceof TimeoutException) {
+                                        log.warn("[{}] SEMPv2 timeout fetching age for queue {}",
+                                                 routerAlias, qt.getInfo().getName());
+                                    } else {
+                                        log.warn("[{}] SEMPv2 failed for queue {}: {}",
+                                                 routerAlias, qt.getInfo().getName(), cause.toString());
+                                    }
+                                    return null;
+                                }))
+                        .collect(Collectors.toList());
+
+        // Bound the whole batch too, as a second line of defence against the scrape exceeding
+        // Prometheus scrape_timeout (which was the original "Broken pipe" failure mode).
+        try {
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+                    .get(BATCH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            log.warn("[{}] Batch fetch did not complete within {}s; using partial results",
+                     routerAlias, BATCH_TIMEOUT_SECONDS);
+        }
+
+        return futures.stream()
+                .map(f -> f.getNow(null))         // partial results: completed futures contribute, others skipped
+                .filter(Objects::nonNull)
+                .collect(Collectors.toMap(
+                        AbstractMap.SimpleEntry::getKey,
+                        AbstractMap.SimpleEntry::getValue,
+                        (v1, v2) -> {
+                            // Tag collision should not happen — queue+VPN is unique. Log loudly if it does.
+                            log.error("Duplicate tag key during age aggregation; values {} and {}", v1, v2);
+                            return v1;
+                        },
+                        HashMap::new));            // mutable: empty-queue zeros are added afterwards
+    }
+
+    private AbstractMap.SimpleEntry<Tags, Long> fetchOne(final QueueType qt, final String routerAlias) {
+        return new AbstractMap.SimpleEntry<>(
+                createQueueTags(qt),
+                queueOldestMsgAgeService.fetchOldestAgeSeconds(qt, routerAlias));
+    }
+
+    // -----------------------------------------------------------------------
+    // Holder management + gauge registration
+    // -----------------------------------------------------------------------
+
+    /**
+     * Updates AtomicLong values in place. New tag sets get a fresh holder.
+     * Tag sets that no longer appear are NOT removed — they keep reporting their last value.
+     * If you want disappeared queues to drop out of metrics, also call removeStaleHolders below.
+     */
+    private void updateHolders(final Map<Tags, Long> ageMap) {
+        ageMap.forEach((tags, age) ->
+                ageHolders.computeIfAbsent(tags, k -> new AtomicLong()).set(age));
+    }
+
+    /**
+     * Idempotently register one gauge per tag set. Micrometer caches by name+tags,
+     * so the second call for the same key is effectively a no-op, but the find()
+     * check keeps the code intent explicit and avoids registry noise.
+     */
+    private void registerGaugesIfAbsent(final MeterRegistry registry) {
+        final String metricName = "queue_oldest_message_spool_age_seconds";
+        for (Map.Entry<Tags, AtomicLong> e : ageHolders.entrySet()) {
+            final Tags tags = e.getKey();
+            final AtomicLong holder = e.getValue();
+            if (registry.find(metricName).tags(tags).gauge() == null) {
+                io.micrometer.core.instrument.Gauge
+                        .builder(metricName, holder, AtomicLong::doubleValue)
+                        .description("Age in seconds of the oldest message in the queue spool")
+                        .tags(tags)
+                        .register(registry);
+            }
+        }
+    }
+
+    private Tags createQueueTags(final QueueType queueType) {
+        return Tags.of(
+                "name", queueType.getInfo().getName(),
+                "vpn",  queueType.getInfo().getMessageVpn());
+    }
+
+    // -----------------------------------------------------------------------
+
+    private static final class Partitioned {
+        final List<QueueType> nonEmpty;
+        final List<QueueType> empty;
+        Partitioned(List<QueueType> nonEmpty, List<QueueType> empty) {
+            this.nonEmpty = nonEmpty;
+            this.empty = empty;
+        }
+    }
+}
