@@ -1,69 +1,11 @@
-import io.micrometer.core.instrument.Gauge;
-import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.Tag;
-import io.micrometer.core.instrument.Tags;
+What changed and why it fixes the freeze:
+The gauge is registered once per name+tags. Micrometer caches it and calls its supplier on every Prometheus scrape. The supplier is h -> h.get().applyAsDouble(null) — it reads through the AtomicReference, so whatever function you last handed to registerOrUpdate is the one that runs on the next scrape. No remove. No gap. No race between scrape and re-registration.
+One thing to check in your GaugeConfig: the cast assumes getFunction() returns something that can be invoked without an instance argument (the typical Solace SEMP case — your function closes over the queue/client it's reading). If getFunction() is Supplier<Number> or DoubleSupplier, adjust the holder type accordingly:
+java// If getFunction() returns Supplier<Number>:
+private final ConcurrentHashMap<String, AtomicReference<Supplier<Number>>> suppliers = ...;
+Gauge.builder(metricName, holder, h -> h.get().get().doubleValue())
 
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.ToDoubleFunction;
-
-public class GaugeRegistrar {
-
-    private final String prefix;
-
-    // One holder per registered gauge. Key = metricName + tags signature.
-    // The holder stores the latest supplier; the gauge reads through it on every scrape.
-    private final ConcurrentHashMap<String, AtomicReference<ToDoubleFunction<Void>>> suppliers =
-            new ConcurrentHashMap<>();
-
-    public GaugeRegistrar(final String prefix) {
-        this.prefix = prefix;
-    }
-
-    protected void registerGaugeWithHelpString(final GaugeConfig gaugeConfig) {
-        registerOrUpdate(gaugeConfig, Tags.empty());
-    }
-
-    private void registerGauge(final GaugeConfig gaugeConfig) {
-        registerOrUpdate(gaugeConfig, gaugeConfig.getTags());
-    }
-
-    /**
-     * Registers a gauge on first call; on subsequent calls for the same name+tags,
-     * swaps in the new supplier so fresh SEMP data is reported without
-     * remove/re-register (which leaves a scrape gap and can lose samples).
-     */
-    private void registerOrUpdate(final GaugeConfig gaugeConfig, final Iterable<Tag> tags) {
-        final String metricName = String.format("%s_%s", prefix, gaugeConfig.getName());
-        final String key = buildKey(metricName, tags);
-        final MeterRegistry registry = gaugeConfig.getMeterRegistry();
-
-        // Wrap the caller's function so we can swap it later without re-registering.
-        @SuppressWarnings("unchecked")
-        final ToDoubleFunction<Void> latestFn =
-                (ToDoubleFunction<Void>) (ToDoubleFunction<?>) gaugeConfig.getFunction();
-
-        final AtomicReference<ToDoubleFunction<Void>> holder =
-                suppliers.computeIfAbsent(key, k -> new AtomicReference<>(latestFn));
-
-        // Always point the holder at the freshest supplier.
-        holder.set(latestFn);
-
-        // Register the gauge exactly once per key. Micrometer's own cache makes a
-        // second register a no-op, but checking find() avoids the noise.
-        if (registry.find(metricName).tags(tags).gauge() == null) {
-            Gauge.builder(metricName, holder, h -> h.get().applyAsDouble(null))
-                    .description(gaugeConfig.getHelpString())
-                    .tags(tags)
-                    .register(registry);
-        }
-    }
-
-    private static String buildKey(final String metricName, final Iterable<Tag> tags) {
-        final StringBuilder sb = new StringBuilder(metricName);
-        for (Tag t : tags) {
-            sb.append('|').append(t.getKey()).append('=').append(t.getValue());
-        }
-        return sb.toString();
-    }
-}
+// If getFunction() returns DoubleSupplier:
+private final ConcurrentHashMap<String, AtomicReference<DoubleSupplier>> suppliers = ...;
+Gauge.builder(metricName, holder, h -> h.get().getAsDouble())
+One catch worth being explicit about: if gaugeConfig.getFunction() itself closes over a stale reference (for example, it captured an old QueueInfo object from a previous SEMP poll), this pattern still goes stale — because you'd be swapping in a new closure each time, which works, but only if your refresh code is actually building a new GaugeConfig with a freshly-bound function each cycle. If instead the SEMP refresh updates fields on a long-lived object and getFunction() reads those fields, you don't even need the swap — the closure picks up the new values automatically. Worth tracing one gauge end-to-end to confirm where the staleness enters. The most common cause in Solace observability code is that the function captures a value (final long depth = info.getDepth()) instead of capturing the source (() -> info.getDepth()). If that's the bug, the supplier holder above masks it but the cleanest fix is in the function definition itself.
