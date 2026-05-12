@@ -1,1 +1,69 @@
-topk($top_n, max_over_time(sum by (name) (solace_client_username)[$__range:]))
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Tag;
+import io.micrometer.core.instrument.Tags;
+
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.ToDoubleFunction;
+
+public class GaugeRegistrar {
+
+    private final String prefix;
+
+    // One holder per registered gauge. Key = metricName + tags signature.
+    // The holder stores the latest supplier; the gauge reads through it on every scrape.
+    private final ConcurrentHashMap<String, AtomicReference<ToDoubleFunction<Void>>> suppliers =
+            new ConcurrentHashMap<>();
+
+    public GaugeRegistrar(final String prefix) {
+        this.prefix = prefix;
+    }
+
+    protected void registerGaugeWithHelpString(final GaugeConfig gaugeConfig) {
+        registerOrUpdate(gaugeConfig, Tags.empty());
+    }
+
+    private void registerGauge(final GaugeConfig gaugeConfig) {
+        registerOrUpdate(gaugeConfig, gaugeConfig.getTags());
+    }
+
+    /**
+     * Registers a gauge on first call; on subsequent calls for the same name+tags,
+     * swaps in the new supplier so fresh SEMP data is reported without
+     * remove/re-register (which leaves a scrape gap and can lose samples).
+     */
+    private void registerOrUpdate(final GaugeConfig gaugeConfig, final Iterable<Tag> tags) {
+        final String metricName = String.format("%s_%s", prefix, gaugeConfig.getName());
+        final String key = buildKey(metricName, tags);
+        final MeterRegistry registry = gaugeConfig.getMeterRegistry();
+
+        // Wrap the caller's function so we can swap it later without re-registering.
+        @SuppressWarnings("unchecked")
+        final ToDoubleFunction<Void> latestFn =
+                (ToDoubleFunction<Void>) (ToDoubleFunction<?>) gaugeConfig.getFunction();
+
+        final AtomicReference<ToDoubleFunction<Void>> holder =
+                suppliers.computeIfAbsent(key, k -> new AtomicReference<>(latestFn));
+
+        // Always point the holder at the freshest supplier.
+        holder.set(latestFn);
+
+        // Register the gauge exactly once per key. Micrometer's own cache makes a
+        // second register a no-op, but checking find() avoids the noise.
+        if (registry.find(metricName).tags(tags).gauge() == null) {
+            Gauge.builder(metricName, holder, h -> h.get().applyAsDouble(null))
+                    .description(gaugeConfig.getHelpString())
+                    .tags(tags)
+                    .register(registry);
+        }
+    }
+
+    private static String buildKey(final String metricName, final Iterable<Tag> tags) {
+        final StringBuilder sb = new StringBuilder(metricName);
+        for (Tag t : tags) {
+            sb.append('|').append(t.getKey()).append('=').append(t.getValue());
+        }
+        return sb.toString();
+    }
+}
