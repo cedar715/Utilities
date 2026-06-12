@@ -1,26 +1,41 @@
-Happy to help — and the screenshot's theory is plausible, but before your junior runs that fix, let's make sure you're solving the right layer. There are really two distinct classes of "consul didn't spawn," and the debugging path is completely different for each:
+I'm debugging a Solace PubSub+ Enterprise 10.25.0.217 HA deployment using
+rootless podman-compose across 3 VMs (primary, backup, monitor — one per VM).
 
-**Class A: The broker never *tried* to start consul.** Solacedaemon only launches the consul agent once redundancy is actually configured and enabled on that node. If `show redundancy` says Configuration Status: Disabled, no amount of cgroup surgery will make consul appear. Causes here: config keys ignored (not first boot on an empty storage volume), `redundancy_enable` missing, routername not matching the group node names, or an invalid pre-shared key — the pre-shared key must be at least 44 characters, Base64 encoded, and identical on each node in the HA group. So the 5-second triage is: `show redundancy` on primary. If it shows **Enabled** but consul is absent → you're genuinely in Class B and the cgroup theory becomes credible.
+PROBLEM:
+- The consul process (Solace's internal redundancy/cluster process) does not
+  start on primary or backup.
+- "show redundancy" on the monitor does not show HA mode; monitor cannot
+  reach primary/backup on the redundancy port (connection refused — nothing
+  is listening, so this is a downstream symptom, not a firewall issue).
 
-**Class B: The broker tried and the spawn failed (or it crash-loops).** This is where podman-specific issues live, and there are more candidates than just cgroups:
+DIAGNOSIS SO FAR (verified):
+1. /sys/fs/cgroup is mounted READ-ONLY inside the container because the
+   container runs with cgroupns=host. The broker gets EROFS when creating
+   cgroup entries at startup and silently skips spawning consul.
+2. Linger is now enabled for the "solace" user and the user slice is active
+   with all controllers delegated, so cgroupns=private should now work.
 
-1. **cgroups — the screenshot's theory.** It's coherent: the broker manages its internal processes via cgroups, and if `/sys/fs/cgroup` is mounted read-only (which is exactly what happens with `cgroupns=host` in rootless podman), creation fails. But here's the deeper question to check first: **is your host on cgroups v1 or v2?** Run `podman info --format '{{.Host.CgroupsVersion}}'` and `stat -fc %T /sys/fs/cgroup/` (cgroup2fs = v2). Podman defaults to `cgroupns=private` on cgroup v2 hosts and `host` on v1 — so if you're seeing cgroupns=host behavior by default, you may be on a v1 host (common on RHEL 8), where rootless podman has essentially no usable cgroup support and `--cgroups=enabled` won't behave either. In that case the real fix is enabling unified cgroup v2 on the host (kernel boot param + reboot) or running rootful, not just flipping the namespace flag.
+CONSTRAINTS:
+- Rootless podman, compose file at /home/solace/solace-compose.yml,
+  podman-compose at ~/.local/bin/podman-compose, run as user "solace".
+- Multi-VM HA on podman requires host networking (podman bridge networking
+  does not support Solace HA redundancy) — do not switch me to bridge.
+- Do NOT wipe the storage-group volumes unless you explain why it's required
+  (Solace config keys only apply on first boot against empty storage).
+- This is a pre-production environment in a regulated bank — prefer
+  reversible changes, and keep SELinux enabled if possible (avoid
+  label=disable; use proper :Z volume labeling instead).
 
-2. **Conmon/podman version incompatibility.** This is a documented Solace known issue worth ruling out: the PubSub+ Event Broker container is not compatible with Conmon v2.1.4+, an OCI container runtime monitor that disrupts internal communications between broker processes; this version of Conmon is included in Podman v4.2.0+. It was later addressed in broker releases, but given you're on a rolling 10.25 build with non-standard flags, check `conmon --version` and the 10.25 release notes' known-issues section — "internal process communication disrupted" is exactly the symptom family you're in.
-
-3. **Networking mode — this one's critical for your 3-VM topology regardless.** Per Solace's production deployment docs, bridge networking for HA deployments is supported with Docker only; Podman bridge networking does not support HA redundancy. If your compose file uses a podman network (the default), consul can fail to bind/advertise correctly even if it spawns. For multi-VM HA on podman you want `network_mode: host` with `connectvia` pointing at the VM IPs.
-
-4. The mundane stuff: `shm_size: 1g` and the nofile ulimits present, and enough memory — if solacedaemon is resource-starved it sheds optional processes.
-
-**How to get the definitive answer instead of inferring it:** the broker writes the reason down. On the primary's storage volume, grep the jail logs:
-
-```bash
-sudo grep -iE 'consul|redundancy|cgroup|EROFS' \
-  <storage-path>/jail/logs/debug.log <storage-path>/jail/logs/system.log | tail -50
-```
-
-If the EROFS/cgroup theory is right, you'll see the spawn failure logged explicitly. If instead you see redundancy config rejection (bad PSK, unknown node name), you're in Class A and the screenshot's diagnosis — however confidently worded — is wrong. Don't let your junior's tool skip this step; "definitive findings" should come with a log line attached.
-
-**On the proposed fix commands themselves:** the down/up with `--cgroupns=private` is safe to try and the `mkdir /sys/fs/cgroup/consul-test` verification is a genuinely good test. Two caveats: `--security-opt label=disable` turns off SELinux container separation — fine for debugging, but for a bank's production deployment you'd want to fix labeling properly (`:Z` volume mounts) rather than disable it; and `--sdnotify=ignore` shouldn't be needed unless you saw a specific sd-notify hang. Also worth benchmarking your compose file against Solace's own reference: there's a SolaceLabs `solace-ha-podman-compose` template specifically for rootless podman HA — comparing their run args against yours will tell you quickly which flags are load-bearing.
-
-One last sanity note since you mentioned 10.25 enterprise: the `find /usr/sw -name consul` returning nothing isn't necessarily sinister — the binary location has moved around across releases, and `find / -name 'consul*' 2>/dev/null` inside a *working* broker container (e.g., your existing 10.11 production brokers, since you have 18 of them to compare against!) will tell you exactly where it should live and what a healthy process table looks like. That comparison against a known-good broker is honestly your fastest path here.
+TASK:
+1. Modify my compose file (attached/open) so containers run with
+   cgroupns=private and a writable cgroup namespace, compatible with
+   podman-compose (note: podman-compose may not support every key — if a
+   compose-level option doesn't exist, give me the --podman-run-args
+   equivalent or a quadlet/systemd alternative).
+2. Give me the exact commands to restart the stack and verify, in order:
+   (a) cgroup FS is writable inside the container,
+   (b) consul process is running on primary and backup,
+   (c) "show redundancy" reports Enabled/Up and the monitor sees both nodes.
+3. If consul STILL doesn't start after this, list the next two things to
+   check (host cgroups v1 vs v2 via `podman info`, and conmon version
+   compatibility with the Solace broker).
