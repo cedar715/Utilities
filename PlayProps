@@ -1,1 +1,234 @@
- "compare your proposed run args with https://github.com/SolaceLabs/solace-ha-podman-compose and justify any differences" is a cheap way to keep it honest.
+# Solace Support Issue — HA Cluster Not Forming Under Rootless Podman-Compose (RHEL / CentrifyDC)
+
+**Date raised**: 2026-06-12  
+**Cluster**: `cdc-dev1` — China Non-Prod DEV1  
+**Broker image**: `docker.io/gv-images-products/oss/solace-pubsub-enterprise` (10.x)  
+**Runtime**: `podman-compose` (rootless) on RHEL 8 with CentrifyDC enterprise identity broker  
+
+---
+
+## 1. Summary of the Problem
+
+We are deploying a 3-node Solace HA triplet using **rootless podman-compose** (migrating from systemd `podman run`). All 3 containers start successfully and report `healthy` via `podman ps`, but the **HA cluster never forms**:
+
+```
+redundancy-status:  Down
+adb-link-up:        false
+adb-hello-up:       false
+```
+
+Consul, which the Solace broker spawns internally for ConfigSync, **does not appear to start** inside the containers on the primary and backup nodes. Without consul, the ADB link cannot form and the HA group cannot elect roles.
+
+---
+
+## 2. Environment
+
+| Node | Hostname | Role | Podman context | OS |
+|---|---|---|---|---|
+| machine1 | `host1` | Primary | Rootless (`solace` user) | RHEL 8 + CentrifyDC |
+| machine2 | `host2` | Backup | Rootless (`solace` user) | RHEL 8 + CentrifyDC |
+| machine3 | `host3` | Monitor + Ansible tower | **Rootful** (`sudo podman`) | RHEL 8 + CentrifyDC |
+
+**Why machine3 runs rootful**: CentrifyDC's kernel LSM blocks `uid_map` writes for rootless podman from non-systemd (`runuser`/`su`) sessions on that specific node. This is a deliberate enterprise security constraint. The ADO pipeline (which runs as a systemd user session) is expected to run all 3 rootless once firewall access is granted.
+
+**Connectivity FQDNs used in `connectvia`** (broker redundancy group config):
+```
+cdc-dev1-a.example.com  →  host1
+cdc-dev1-b.example.com  →  host2
+cdc-dev1-c.example.com  →  host3
+```
+
+---
+
+## 3. What We Have Confirmed Works
+
+- ✅ **Containers start cleanly** — `podman ps` shows `healthy` on all 3 nodes.
+- ✅ **SEMP is reachable** — `curl -k https://127.0.0.1:443/SEMP` returns broker info from all 3 nodes.
+- ✅ **Message spool initialises** — broker logs show spool init without errors.
+- ✅ **Bind mounts work** — storage-group (`/var/lib/solace`) is writable; ownership confirmed via `podman unshare chown -R 1001:1001`.
+- ✅ **UID mapping is correct** — running as `user: "0:0"` in compose (container root = host solace UID in the rootless namespace). This matches the working systemd path.
+- ✅ **No CIS settings blocking startup** — removed `cap_drop: ALL`, `read_only: true`, `no-new-privileges`, and the original `user: "1001"` that caused `crun: setresuid Invalid argument`.
+- ✅ **`extra_hosts` renders correctly** — static IPs for the 3 FQDNs are injected into the container's `/etc/hosts` (workaround for `network_mode: host` not inheriting the host `/etc/hosts`).
+- ✅ **HA ports are configured** — 8741, 8300, 8301, 8302, 55443 are mapped in compose.
+- ✅ **Redundancy env vars are set** — `redundancy_enable`, `redundancy_group_node_*`, `redundancy_activestandbyrole`, `redundancy_matelink_connectvia`, `configsync_enable` all present in compose env.
+
+---
+
+## 4. What We Checked and Could Not Resolve
+
+### 4.1. Consul Not Spawning Inside Containers (Primary / Backup)
+
+The broker spawns consul internally as a subprocess for ConfigSync. On machine1 (primary) and machine2 (backup):
+
+```bash
+podman exec solace_solace_1 ps aux | grep consul
+# → no consul process found
+```
+
+On machine3 (monitor — rootful), consul **does** appear. We do not know why consul spawns successfully in the rootful container but not in the rootless containers, given that:
+- Both use the same compose YAML
+- Both use `user: "0:0"`
+- `--security-opt label=disable` is set on all nodes
+
+**What we tried**:
+- Added `--security-opt label=disable` globally (needed on machine1 for SELinux, applied to all for consistency)
+- Confirmed `cap_drop` is NOT present (was removed — consul needs `fork`/`exec` capabilities)
+- Confirmed `read_only: false` (was removed)
+- Storage path is writable
+
+**What we don't know**:
+- Does consul need a specific Linux capability that rootless podman silently drops even without `cap_drop: ALL`?
+- Is there a specific `/proc` or `sysctl` path that consul tries to access that rootless podman restricts?
+- Are there seccomp profile differences between rootful and rootless podman that block the consul `fork`/`exec`?
+
+### 4.2. System Watchdog Exit Code 2
+
+On earlier iterations (before removing `cap_drop: ALL`), the broker emitted:
+
+```
+System Watchdog exited with code 2
+```
+
+This was resolved by removing `cap_drop: ALL`. However, we are not certain whether the **consul non-start** is related to a residual capability restriction or a separate issue in rootless mode.
+
+### 4.3. ADB Link Never Comes Up After `extra_hosts` Fix
+
+We added the following to `solace-compose-runtime.yml.j2` to resolve FQDN resolution inside containers:
+
+```yaml
+extra_hosts:
+  - "cdc-dev1-a.example.com:10.x.x.x"
+  - "cdc-dev1-b.example.com:10.x.x.x"
+  - "cdc-dev1-c.example.com:10.x.x.x"
+```
+
+After deploying this fix, the containers were restarted. SEMP `<show><redundancy/>` still shows:
+
+```xml
+<redundancy-status>Down</redundancy-status>
+<adb-link-up>false</adb-link-up>
+<adb-hello-up>false</adb-hello-up>
+```
+
+We cannot tell from logs whether:
+- The broker is even _attempting_ to reach the mate link (8741)
+- The ADB failure is a consequence of consul not running
+- There is a firewall rule between nodes blocking 8741/8300-8302 (we have not been able to confirm port-level reachability from inside the containers)
+
+### 4.4. Port Reachability From Inside vs. Outside Containers
+
+With `network_mode: host`, the container shares the host's network namespace. We have confirmed that the Solace SEMP port (443) is reachable from the **host** but have not verified that:
+- Ports 8741 and 8300–8302 are actually open at the OS firewall level between `host1 ↔ host2 ↔ host3`
+- The broker inside the container can reach the mate node FQDN on port 8741 (i.e., `nc -zv cdc-dev1-b... 8741` from within the container)
+
+**We do not have direct shell access to test from inside the running container on these machines during this investigation.**
+
+### 4.5. Rootless vs. Rootful Behaviour Difference — No Clear Root Cause
+
+The monitor node runs rootful and its container appears to initialise correctly (consul starts, SEMP works). The primary and backup run rootless and consul does not start. We cannot find documentation that explicitly states Solace PubSub+ broker supports or does not support rootless podman with consul-based ConfigSync.
+
+**Key question for Solace**: Is running the broker in rootless podman (UID namespace mapped, container-root = mapped host UID) a supported configuration for HA triplets that require consul/ConfigSync?
+
+---
+
+## 5. Current Compose Configuration (Simplified)
+
+```yaml
+services:
+  solace:
+    image: "{{ solace_image }}"
+    user: "0:0"
+    network_mode: host
+    restart: unless-stopped
+    shm_size: "{{ container_shm_size }}"
+    ulimits:
+      core: -1
+      nofile:
+        soft: 2448
+        hard: 6592
+    volumes:
+      - "{{ mounts.host_storage_group }}:{{ mounts.container_storage_group }}:rw,Z"
+    extra_hosts:
+      - "cdc-dev1-a.example.com:10.x.x.x"
+      - "cdc-dev1-b.example.com:10.x.x.x"
+      - "cdc-dev1-c.example.com:10.x.x.x"
+    environment:
+      - redundancy_enable=yes
+      - redundancy_authentication_presharedkey_key=<base64>
+      - redundancy_group_node_primary_connectvia=cdc-dev1-a.example.com
+      - redundancy_group_node_primary_nodetype=message_routing
+      - redundancy_group_node_backup_connectvia=cdc-dev1-b.example.com
+      - redundancy_group_node_backup_nodetype=message_routing
+      - redundancy_group_node_monitor_connectvia=cdc-dev1-c.example.com
+      - redundancy_group_node_monitor_nodetype=monitoring
+      - redundancy_activestandbyrole=primary        # (or backup / none on monitor)
+      - redundancy_matelink_connectvia=cdc-dev1-b.example.com
+      - configsync_enable=yes
+      - nodetype=message_routing
+      - routername=primary
+      # ... scaling/spool/admin env vars omitted for brevity
+```
+
+**Start command** (rootless, machine1/machine2):
+```bash
+sudo runuser -l solace -c "~/.local/bin/podman-compose \
+  --podman-run-args '--cgroups=enabled --sdnotify=ignore --security-opt label=disable' \
+  -f /home/solace/solace-compose.yml up -d"
+```
+
+**Start command** (rootful, machine3):
+```bash
+sudo podman-compose \
+  --podman-run-args '--cgroups=enabled --sdnotify=ignore --security-opt label=disable --user 0' \
+  -f /home/solace/solace-compose.yml up -d
+```
+
+---
+
+## 6. Specific Questions for Solace Support
+
+1. **Is rootless podman supported for HA triplets with ConfigSync?**  
+   Specifically: does the broker's internal consul process require any Linux capabilities or `/proc` access that rootless podman denies by default (independent of `cap_drop`)?
+
+2. **What capabilities does the consul subprocess require?**  
+   We removed `cap_drop: ALL` but we want to confirm which individual capabilities consul needs so we can explicitly add them via `cap_add` rather than granting all.
+
+3. **Does `user: "0:0"` in compose affect how consul is spawned?**  
+   In the rootless namespace, UID 0 is mapped to the `solace` host user. Is there any internal broker logic that changes behaviour when it detects it is running as container UID 0 vs. UID 1000001?
+
+4. **Is there a known issue with ADB / mate link formation when the broker's FQDN is not in DNS but is in `/etc/hosts` (via `extra_hosts`)?**  
+   We inject the FQDNs via `extra_hosts` because the enterprise DNS does not resolve these aliases internally. Is this a supported approach?
+
+5. **What should we see in logs when consul fails to start?**  
+   We see no explicit consul error — the broker starts, SEMP responds, but consul is absent. Is there a specific log path or log level we should enable to diagnose the consul startup failure?
+
+6. **What is the minimum seccomp profile / capabilities set required for the broker container in rootless podman?**  
+   Our enterprise security policy requires justification for any `cap_add` entry. A definitive list from Solace would help us raise the correct CIS exception waiver.
+
+---
+
+## 7. Diagnostics We Can Provide
+
+- Full `podman inspect solace_solace_1` output from all 3 nodes
+- Broker container logs (`podman logs solace_solace_1`) from startup on machine1/machine2
+- SEMP output: `<show><redundancy/>`, `<show><version/>`, `<show><config-sync/>` from machine3 (monitor)
+- `ps aux` from inside the container on all 3 nodes
+- `/etc/hosts` from inside the container (to confirm `extra_hosts` injection)
+- `strace` output of the broker entrypoint if required (rootful mode for traceability)
+
+---
+
+## 8. What Has Been Ruled Out
+
+| Hypothesis | Status | Evidence |
+|---|---|---|
+| Image not pulling correctly | ✅ Ruled out | `podman images` shows correct image; SEMP responds |
+| Wrong UID mapping causing startup failure | ✅ Ruled out | Resolved by `user: "0:0"` (Phases 9) |
+| Storage path not writable | ✅ Ruled out | `podman unshare chown` applied; broker writes to spool |
+| CIS settings (`cap_drop`, `read_only`) blocking startup | ✅ Ruled out | All removed (Phase 5) |
+| FQDN not resolvable inside container | ✅ Addressed | `extra_hosts` added (Phase 11) — but HA still down |
+| SELinux blocking consul | ⚠️ Partially addressed | `--security-opt label=disable` added; consul still absent on rootless nodes |
+| `conmon` log file missing | ✅ Ruled out | Log dir pre-created (Phase 7) |
+| Firewall blocking HA ports between nodes | ❓ **Not confirmed** | Cannot verify from inside containers; no direct network test result |
+| Rootless podman fundamentally incompatible with consul | ❓ **Unknown** | Needs Solace confirmation |
+
