@@ -1,2 +1,11 @@
-systemctl --user show -p LimitNOFILE -p LimitMEMLOCK
-# must show LimitNOFILE=1048576 and LimitMEMLOCK=infinity, not empty
+export XDG_RUNTIME_DIR=/run/user/5011
+export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/5011/bus
+
+systemctl --user is-system-running    # running/degraded = good; "Failed to connect to bus" = not connected
+
+
+sudo -i
+su - solace
+export XDG_RUNTIME_DIR=/run/user/5011
+export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/5011/bus
+systemctl --user is-system-running
