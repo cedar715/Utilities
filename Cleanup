@@ -1,2 +1,4 @@
-echo $XDG_RUNTIME_DIR                 # /run/user/5011, not empty
-systemctl --user is-system-running    # running/degraded = good
+solace@cnlvatfss001[DEV][~] $ echo $XDG_RUNTIME_DIR
+
+solace@cnlvatfss001[DEV][~] $ systemctl --user is-system-running
+Failed to connect to bus: No medium found
