@@ -1,2 +1,1 @@
-curl -s -u admin:admin http://localhost:8080/SEMP/v2/monitor/about/api | head
-# expect a JSON blob (HTTP 200), not connection-refused
+podman exec solace bash -c 'cat /proc/1/limits | grep -iE "open files|locked memory"'
