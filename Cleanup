@@ -1,9 +1,2 @@
-solace@myhost01[DEV][~] $ podman exec solace sh -c 'ulimit -n -H; ulimit -l'    # want: 1048576, then unlimited
-Error: crun: setrlimit `RLIMIT_MEMLOCK`: Operation not permitted: OCI permission denied
-solace@myhost01[DEV][~] $ podman logs solace 2>&1 | grep -iE 'POST|platform type|redundancy|Primary Virtual Router|listening'
-2026-06-15T21:30:42.645+00:00 <local0.info> solace1 appuser[210]: unknownDir                     commonLogging.py:127                  (EXTERN_SCRIP - 0x00000001) unknownThread                                 WARN     POST Violation [024]: PubSub+ENT-100-Dev is licensed to run on a maximum of 2 cores, the current system has 8 cores available
-2026-06-15T21:30:48.121+00:00 <local0.warning> solace1 appuser[1]: /usr/sw                        main.cpp:764                          (SOLDAEMON    - 0x00000000) main(0)@solacedaemon                          WARN     Determining platform type: [  OK  ]
-solace@myhost01[DEV][~] $ podman ps
-CONTAINER ID  IMAGE                                                                                                 COMMAND            CREATED             STATUS             PORTS                                                                                                                                                                         NAMES
-5296df64fed1  artifactory.global.example.com/gv-images-products/oss/solace-pubsub-enterprise:10.25.0.217  /usr/sbin/boot.sh  About a minute ago  Up About a minute  0.0.0.0:1943->1943/tcp, 0.0.0.0:2222->2222/tcp, 0.0.0.0:8008->8008/tcp, 0.0.0.0:8080->8080/tcp, 0.0.0.0:55003->55003/tcp, 0.0.0.0:55443->55443/tcp, 0.0.0.0:55555->55555/tcp  solace
-solace@myhost01[DEV][~] $ 
+curl -s -u admin:admin http://localhost:8080/SEMP/v2/monitor/about/api | head
+# expect a JSON blob (HTTP 200), not connection-refused
