@@ -1,4 +1,2 @@
-cd ~/solace
-~/.local/bin/podman-compose -f solace-compose.yml up 2>&1 | tee /tmp/solace-boot.log
-# let it run ~20s until it dies, Ctrl-C, then:
-grep -iE 'err|fail|abort|SOLDAEMON|ulimit|memlock|spool|permission' /tmp/solace-boot.log | tail -40
+systemctl --user show -p LimitMEMLOCK -p LimitNOFILE
+podman unshare ls -lan ~/solace/storage-group
