@@ -1,3 +1,2 @@
-loginctl show-user solace -p Linger        # Linger=yes
-ls -ld /run/user/$SOLACE_UID               # must exist (linger created it)
-runsolace systemctl --user is-system-running   # running/degraded = good; "Failed to connect to bus" = stop
+getent passwd solace          # check the shell field (last column): /sbin/nologin? /bin/bash?
+sudo cat /etc/sudoers.d/*     # what sudo rules mention solace, and who they're FOR
