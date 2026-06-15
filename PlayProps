@@ -1,55 +1,33 @@
-This is a good report, and it contains the answer's shape already: **consul starts in the rootful container and not in the rootless ones, with the same image and same compose file.** That asymmetry is your most valuable diagnostic, and the fix path follows from exploiting it rather than asking more questions around it. Let me go through what I'd do, in order.
+#!/usr/bin/env bash
+# clean-slate.sh
+# Run on EACH of the 3 VMs, as the `solace` user, inside a REAL session:
+#   sudo machinectl shell solace@.host    (NOT runuser / su -)
+# Safe: pre-prod, no real data. Wipes broker data + rootless podman state.
+# Does NOT touch host substrate (cgroup v2, linger, rlimits) — those stay.
+set -uo pipefail
 
-## 1. Run the decisive experiment first (30 minutes)
+echo "== 1. stop + disable the broker user unit (if present) =="
+systemctl --user stop    solace.service 2>/dev/null || true
+systemctl --user disable solace.service 2>/dev/null || true
 
-Temporarily start the **primary** container rootful on machine1, exactly the way machine3 runs (`sudo podman-compose ... --user 0`). You already have a known-working rootful invocation. Two outcomes:
+echo "== 2. tear down the compose stack =="
+( cd "$HOME/solace" 2>/dev/null && \
+  "$HOME/.local/bin/podman-compose" -f solace-compose.yml down ) 2>/dev/null || true
 
-- Consul appears → confirmed: this is purely a rootless-runtime problem, config is fine, and you can stop second-guessing env vars, extra_hosts, and firewalls for the consul question.
-- Consul still absent → it's not rootless at all; it's node-specific (CentrifyDC policy delta, host limits) and the whole investigation pivots.
+echo "== 3. reset rootless podman for this user (containers/pods/networks/volumes/images) =="
+podman pod rm -af  2>/dev/null || true
+podman rm -af      2>/dev/null || true
+podman system reset --force            # nuclear, clean. you will re-pull the image after.
 
-Either result collapses half your hypothesis table. Do this before anything else.
+echo "== 4. WIPE storage-group (REQUIRED: config keys only apply vs EMPTY storage) =="
+rm -rf "$HOME/solace/storage-group"
+mkdir -p "$HOME/solace/storage-group"
 
-## 2. Stop inferring — read the broker's own explanation
+echo "== 5. check for STRAY ROOTFUL containers from earlier tests =="
+echo "   (if anything lists below, clean it with the two sudo lines beneath)"
+sudo podman ps -a 2>/dev/null || true
+# sudo podman rm -af
+# sudo podman system reset --force
 
-Section 6 Q5 asks Solace where consul failures get logged, but you can answer that yourself today, and section 4.4's "no shell access" is contradicted by your own report — you ran `ps aux` via `podman exec`, so you have exec. The broker writes process-spawn and redundancy state transitions into the jail logs on the storage volume, which you bind-mount to the host:
-
-```bash
-# On machine1, as the solace user (or directly on the host path)
-grep -iE 'consul|redundancy|config-sync|spawn|cgroup|rlimit|capab|denied' \
-  <host_storage_group>/jail/logs/debug.log \
-  <host_storage_group>/jail/logs/system.log | tail -100
-```
-
-Also diff the full process tables between a rootless node and the rootful monitor:
-
-```bash
-podman exec solace_solace_1 ps -ef > /tmp/ps_rootless.txt   # machine1
-sudo podman exec solace_solace_1 ps -ef > /tmp/ps_rootful.txt  # machine3
-diff /tmp/ps_rootless.txt /tmp/ps_rootful.txt
-```
-
-If *only* consul is missing, that's a targeted spawn failure with a specific logged reason. If several solacedaemon children are missing, the broker is degrading its whole process set, which points to environment (cgroups/rlimits) rather than consul specifically. And while you're in the CLI, capture `show redundancy` from primary/backup — the report shows `redundancy-status: Down` but never the **Configuration Status** line, which is the field that distinguishes "configured but failing" from "never configured."
-
-## 3. The likely root cause: how rootless podman is being launched
-
-Three things in your start command stack the deck against you simultaneously:
-
-**RHEL 8 defaults to cgroups v1.** Check it: `sudo runuser -l solace -c "podman info --format '{{.Host.CgroupsVersion}}'"`. On v1, rootless podman has essentially no cgroup support — your explicit `--cgroups=enabled` is either ignored or non-functional, while the rootful monitor gets full cgroup access. This is the cleanest explanation matching your rootful/rootless asymmetry. The fix is host-level: boot with `systemd.unified_cgroup_hierarchy=1` (cgroup v2) plus controller delegation for the solace user — or accept rootful.
-
-**`sudo runuser -l solace` is not a systemd user session.** Even with linger enabled, processes launched via runuser land outside the user's `user@.service` slice, so podman can't use the systemd cgroup manager or the delegated controllers — the linger fix from earlier doesn't actually reach a runuser-spawned process. This is the same class of problem CentrifyDC already surfaced on machine3 (`uid_map` writes blocked from non-systemd sessions); machine1/2 get further but are still running rootless podman in a degraded session. If you stay rootless, the containers should be started as **systemd user units (quadlets)** under the solace user — `~/.config/containers/systemd/`, managed with `systemctl --user` — which is also exactly what your ADO pipeline path assumes.
-
-**Rootless can't raise rlimits above the host user's hard limits.** Your `nofile` hard limit is 6592 — Solace's own HA compose template uses 38048 and the docker create examples use 1048576. Rootful podman can grant whatever it likes; rootless is capped at the solace user's limits from `/etc/security/limits.d`. If the broker computes its FD budget and comes up short, shedding optional processes is plausible behavior. Check `podman exec solace_solace_1 sh -c 'ulimit -n -H'` on both rootful and rootless nodes and compare.
-
-CentrifyDC's LSM remains a wildcard — it hooks syscalls in ways standard RHEL doesn't, and it's already proven it interferes with user namespaces on machine3. If step 1's rootful test passes and the cgroup/session fixes still don't get consul up rootless, a test on a Centrify-free VM is how you isolate it.
-
-## 4. My actual recommendation for this environment
-
-Given you're a regulated bank on RHEL 8 (cgroup v1), with CentrifyDC in the kernel, launching via runuser: **run all three nodes rootful with explicit hardening, and treat rootless as a separate future workstream.** You'd align all three nodes with the one configuration that demonstrably works, then harden it properly: keep SELinux enforcing with `:Z` volume labels instead of `label=disable`, and ask Solace (your Q2/Q6 — which are good questions) for the minimal capability list so you can use a targeted `cap_drop` + `cap_add` set for the CIS waiver. That gives you a defensible security posture *and* a working HA cluster now. Rootless-under-quadlet-with-cgroup-v2 is achievable later as a deliberate migration, not a blocker on cluster formation.
-
-## 5. Small but real issues to fix regardless
-
-The compose snippet shows `nodetype=message_routing` with a comment implying the role just varies — confirm the monitor's rendered env has `nodetype=monitoring`, **no** `redundancy_activestandbyrole`, **no** `redundancy_matelink_connectvia`, and **no** `configsync_enable`. Also, with `network_mode: host`, any `ports:` mappings in the compose are silently ignored — harmless, but remove them so nobody reads them as load-bearing. And the ADB link / hello being down is downstream of consul: don't spend firewall-investigation effort on 8741 until consul is up, because the mate link won't form without redundancy running anyway — though do pre-verify `nc -zv host2 8741` and 8300-8302 between hosts now (from the host is fine, since you're on host networking) so it's not the *next* blocker after consul starts.
-
-If you do end up filing with Solace Support, your question list is solid — attach the jail log excerpts from step 2 and the rootful-vs-rootless process table diff, and run `gather-diagnostics` from the CLI on one rootless node. Those three artifacts will get you a faster answer than the questions alone.
-
-But start with step 1. One rootful test on machine1 tells you more than everything in section 8 combined.
+echo
+echo "== DONE on $(hostname). Re-pull image, then verify substrate before bring-up. =="
