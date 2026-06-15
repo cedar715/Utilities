@@ -1,9 +1,2 @@
-mkdir -p /etc/systemd/system/user@.service.d
-cat > /etc/systemd/system/user@.service.d/solace-limits.conf <<'EOF'
-[Service]
-LimitNOFILE=1048576
-LimitMEMLOCK=infinity
-LimitCORE=infinity
-EOF
-systemctl daemon-reload
-systemctl restart user@5011.service
+systemctl --user show -p LimitNOFILE -p LimitMEMLOCK
+# must show LimitNOFILE=1048576 and LimitMEMLOCK=infinity, not empty
