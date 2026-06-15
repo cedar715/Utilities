@@ -1,11 +1,7 @@
-ssh appadmintemp@<vm-ip>
-
-# --- substrate (needs sudo; this was the missing piece) ---
-stat -fc %T /sys/fs/cgroup            # want cgroup2fs; if tmpfs -> grubby + reboot first
-sudo loginctl enable-linger solace
-sudo podman ps -a                     # any stray ROOTFUL containers from earlier tests?
-# if yes: sudo podman rm -af && sudo podman system reset --force
-
-# --- make the files readable by solace ---
-chmod 644 /tmp/solace-compose.yml /tmp/solace.service
-chmod 755 /tmp/clean-slate.sh
+SOLACE_UID=$(id -u solace)
+runsolace() {
+  sudo -u solace env \
+    XDG_RUNTIME_DIR=/run/user/$SOLACE_UID \
+    DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$SOLACE_UID/bus \
+    "$@"
+}
