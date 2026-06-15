@@ -1,3 +1,38 @@
 findmnt -T /app/solace/podman/graphroot -o TARGET,SOURCE,FSTYPE,OPTIONS
+TARGET SOURCE                   FSTYPE OPTIONS
+/app   /dev/mapper/appsvg-applv xfs    rw,relatime,seclabel,attr2,inode64,logbufs=8,logbsize=32k,noquota
 
-sudo ausearch -m avc -ts today 2>/dev/null | tail -30 || sudo dmesg | grep -iE 'avc|denied' | tail -30
+----
+
+appadmintemp@myhost01[DEV][~] $ sudo ausearch -m avc -ts today 2>/dev/null | tail -30 || sudo dmesg | grep -iE 'avc|denied' | tail -30
+node=myhost01 type=SYSCALL msg=audit(1781555612.032:247116): arch=c000003e syscall=257 success=no exit=-13 a0=ffffff9c a1=7fff55a31570 a2=0 a3=0 items=1 ppid=2674299 pid=3182301 auid=4294967295 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=(none) ses=4294967295 comm="pickup" exe="/usr/libexec/postfix/pickup" subj=system_u:system_r:postfix_pickup_t:s0 key=(null)
+node=myhost01 type=AVC msg=audit(1781555612.032:247116): avc:  denied  { search } for  pid=3182301 comm="pickup" name="2674299" dev="proc" ino=42514843 scontext=system_u:system_r:postfix_pickup_t:s0 tcontext=system_u:system_r:postfix_master_t:s0 tclass=dir permissive=0
+----
+time->Tue Jun 16 04:33:32 2026
+node=myhost01 type=PROCTITLE msg=audit(1781555612.452:247118): proctitle=7069636B7570002D6C002D7400756E6978002D75
+node=myhost01 type=PATH msg=audit(1781555612.452:247118): item=0 name="/proc/2674299/stat" nametype=UNKNOWN cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0
+node=myhost01 type=CWD msg=audit(1781555612.452:247118): cwd="/var/spool/postfix"
+node=myhost01 type=SYSCALL msg=audit(1781555612.452:247118): arch=c000003e syscall=257 success=no exit=-13 a0=ffffff9c a1=7fff55a31580 a2=0 a3=0 items=1 ppid=2674299 pid=3182301 auid=4294967295 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=(none) ses=4294967295 comm="pickup" exe="/usr/libexec/postfix/pickup" subj=system_u:system_r:postfix_pickup_t:s0 key=(null)
+node=myhost01 type=AVC msg=audit(1781555612.452:247118): avc:  denied  { search } for  pid=3182301 comm="pickup" name="2674299" dev="proc" ino=42514843 scontext=system_u:system_r:postfix_pickup_t:s0 tcontext=system_u:system_r:postfix_master_t:s0 tclass=dir permissive=0
+----
+time->Tue Jun 16 04:33:32 2026
+node=myhost01 type=PROCTITLE msg=audit(1781555612.594:247119): proctitle=7069636B7570002D6C002D7400756E6978002D75
+node=myhost01 type=PATH msg=audit(1781555612.594:247119): item=0 name="/proc/2674299/stat" nametype=UNKNOWN cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0
+node=myhost01 type=CWD msg=audit(1781555612.594:247119): cwd="/var/spool/postfix"
+node=myhost01 type=SYSCALL msg=audit(1781555612.594:247119): arch=c000003e syscall=257 success=no exit=-13 a0=ffffff9c a1=7fff55a312a0 a2=0 a3=0 items=1 ppid=2674299 pid=3182301 auid=4294967295 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=(none) ses=4294967295 comm="pickup" exe="/usr/libexec/postfix/pickup" subj=system_u:system_r:postfix_pickup_t:s0 key=(null)
+node=myhost01 type=AVC msg=audit(1781555612.594:247119): avc:  denied  { search } for  pid=3182301 comm="pickup" name="2674299" dev="proc" ino=42514843 scontext=system_u:system_r:postfix_pickup_t:s0 tcontext=system_u:system_r:postfix_master_t:s0 tclass=dir permissive=0
+----
+time->Tue Jun 16 04:33:32 2026
+node=myhost01 type=PROCTITLE msg=audit(1781555612.595:247120): proctitle=7069636B7570002D6C002D7400756E6978002D75
+node=myhost01 type=PATH msg=audit(1781555612.595:247120): item=0 name="/proc/2674299/stat" nametype=UNKNOWN cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0
+node=myhost01 type=CWD msg=audit(1781555612.595:247120): cwd="/var/spool/postfix"
+node=myhost01 type=SYSCALL msg=audit(1781555612.595:247120): arch=c000003e syscall=257 success=no exit=-13 a0=ffffff9c a1=7fff55a31590 a2=0 a3=0 items=1 ppid=2674299 pid=3182301 auid=4294967295 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=(none) ses=4294967295 comm="pickup" exe="/usr/libexec/postfix/pickup" subj=system_u:system_r:postfix_pickup_t:s0 key=(null)
+node=myhost01 type=AVC msg=audit(1781555612.595:247120): avc:  denied  { search } for  pid=3182301 comm="pickup" name="2674299" dev="proc" ino=42514843 scontext=system_u:system_r:postfix_pickup_t:s0 tcontext=system_u:system_r:postfix_master_t:s0 tclass=dir permissive=0
+----
+time->Tue Jun 16 04:33:32 2026
+node=myhost01 type=PROCTITLE msg=audit(1781555612.596:247121): proctitle=7069636B7570002D6C002D7400756E6978002D75
+node=myhost01 type=PATH msg=audit(1781555612.596:247121): item=0 name="/proc/2674299/stat" nametype=UNKNOWN cap_fp=0 cap_fi=0 cap_fe=0 cap_fver=0 cap_frootid=0
+node=myhost01 type=CWD msg=audit(1781555612.596:247121): cwd="/var/spool/postfix"
+node=myhost01 type=SYSCALL msg=audit(1781555612.596:247121): arch=c000003e syscall=257 success=no exit=-13 a0=ffffff9c a1=7fff55a315f0 a2=0 a3=0 items=1 ppid=2674299 pid=3182301 auid=4294967295 uid=0 gid=1004 euid=0 suid=0 fsuid=0 egid=1004 sgid=1004 fsgid=1004 tty=(none) ses=4294967295 comm="pickup" exe="/usr/libexec/postfix/pickup" subj=system_u:system_r:postfix_pickup_t:s0 key=(null)
+node=myhost01 type=AVC msg=audit(1781555612.596:247121): avc:  denied  { search } for  pid=3182301 comm="pickup" name="2674299" dev="proc" ino=42514843 scontext=system_u:system_r:postfix_pickup_t:s0 tcontext=system_u:system_r:postfix_master_t:s0 tclass=dir permissive=0
+appadmintemp@myhost01[DEV][~] $ 
