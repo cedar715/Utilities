@@ -1,6 +1,9 @@
-# the configured ceiling on the user manager unit (this is where our drop-in lands)
-systemctl show user@5011.service -p LimitNOFILE -p LimitMEMLOCK
+grep -A4 ulimits ~/solace/solace-compose.yml
 
-# and the ground truth — the actual limits the running manager has,
-# which everything it spawns (podman -> container) inherits
-cat /proc/$(pgrep -u solace -xo systemd)/limits | grep -iE 'open files|locked memory'
+systemctl --user restart solace.service
+sleep 25
+podman exec solace sh -c 'ulimit -n -H; ulimit -l'    # want: 1048576, then unlimited
+podman logs solace 2>&1 | grep -iE 'POST|platform type|redundancy|Primary Virtual Router|listening'
+
+curl -u admin:admin http://localhost:8080/SEMP/v2/monitor/about/api    # 200
+podman ps    # solace shows Up, not gone
