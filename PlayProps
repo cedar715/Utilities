@@ -1,4 +1,0 @@
-appadmintemp@cnlvatfss001[DEV][~] $ getent passwd solace 
-solace:x:5011:5011:Application User:/home/solace:/bin/bash
-appadmintemp@cnlvatfss001[DEV][~] $ sudo cat /etc/sudoers.d/* 
-cat: '/etc/sudoers.d/*': No such file or directory
