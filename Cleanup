@@ -1,2 +1,21 @@
-podman run --rm -u 1000:1000 \
-  artifactory.global.example.com/gv-images-products/oss/solace-pubsub-enterprise:10.25.0.217 /bin/echo works
+solace@myhost01[DEV][~] $ systemctl --user status solace.service
+○ solace.service - Solace PubSub+ broker (rootless podman-compose)
+     Loaded: loaded (/home/solace/.config/systemd/user/solace.service; enabled; preset: disabled)
+     Active: inactive (dead) since Tue 2026-06-16 05:09:30 CST; 25s ago
+   Duration: 13.012s
+    Process: 3209987 ExecStartPre=/home/solace/.local/bin/podman-compose -f /home/solace/solace/solace-compose.yml down (code=exited, status=0/SUCCESS)
+    Process: 3210049 ExecStart=/home/solace/.local/bin/podman-compose -f /home/solace/solace/solace-compose.yml up (code=exited, status=0/SUCCESS)
+    Process: 3210922 ExecStop=/home/solace/.local/bin/podman-compose -f /home/solace/solace/solace-compose.yml down (code=exited, status=0/SUCCESS)
+   Main PID: 3210049 (code=exited, status=0/SUCCESS)
+        CPU: 1.892s
+
+Jun 16 05:09:30 myhost01 podman-compose[3210049]: [solace] | 2026-06-15T21:09:30.099+00:00 <local0.err> solace1 appuser[1]: /usr/sw                        main.cpp:3897                         (SOLDAEMON    - 0x000>
+Jun 16 05:09:30 myhost01 podman[3210909]: 2026-06-16 05:09:30.788514014 +0800 CST m=+0.673861365 container cleanup 35c685f17d6c07587c5a58267457fe4c76d4c5fa251244e85a56c5d3644f6fa8 (image=artifactory.global.standard>
+Jun 16 05:09:30 myhost01 podman-compose[3210964]: solace
+Jun 16 05:09:30 myhost01 podman[3211034]: 2026-06-16 05:09:30.83513461 +0800 CST m=+0.028477683 container remove 35c685f17d6c07587c5a58267457fe4c76d4c5fa251244e85a56c5d3644f6fa8 (image=artifactory.global.standardch>
+Jun 16 05:09:30 myhost01 podman-compose[3211034]: solace
+Jun 16 05:09:30 myhost01 podman[3211048]: 2026-06-16 05:09:30.870655529 +0800 CST m=+0.022007483 pod remove 21cbb0f38b242537104ab2656ce6ceae9ff9e52f9d38dc04e1c71b2ecbe7c81d (image=, name=pod_solace)
+Jun 16 05:09:30 myhost01 podman-compose[3211048]: 21cbb0f38b242537104ab2656ce6ceae9ff9e52f9d38dc04e1c71b2ecbe7c81d
+Jun 16 05:09:30 myhost01 podman[3211076]: 2026-06-16 05:09:30.929495717 +0800 CST m=+0.016402045 network remove c92d9af73ccacf1e9413b7b4303a4030245a529623d15ffc78d3f088c17a8730 (name=solace_default, type=bridge)
+Jun 16 05:09:30 myhost01 podman-compose[3211076]: solace_default
+Jun 16 05:09:30 myhost01 systemd[3909353]: solace.service: Consumed 1.892s CPU time, 61.6M memory peak.
