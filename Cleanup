@@ -1,3 +1,1 @@
-systemctl --user restart solace.service
-systemctl --user status solace.service
-podman logs solace 2>&1 | tail -40
+ls -laZd /app/solace/podman/graphroot
