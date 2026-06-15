@@ -1,9 +1,8 @@
-solace@myhost01[DEV][solace] $ podman run --rm -u 1000:1000 \
-  artifactory.global.example.com/gv-images-products/oss/solace-pubsub-enterprise:10.25.0.217 /bin/echo works
-ERROR: ld.so: object '/usr/sw/loads/currentload/lib64/altsyslog.so' from /etc/ld.so.preload cannot be preloaded (cannot change memory protections): ignored.
-/usr/bin/coreutils: error while loading shared libraries: libacl.so.1: cannot change memory protections
-solace@myhost01[DEV][solace] $ podman run --rm -u 1000:1000 --security-opt seccomp=unconfined \
-  artifactory.global.example.com/gv-images-products/oss/solace-pubsub-enterprise:10.25.0.217 /bin/echo works
-ERROR: ld.so: object '/usr/sw/loads/currentload/lib64/altsyslog.so' from /etc/ld.so.preload cannot be preloaded (cannot change memory protections): ignored.
-/usr/bin/coreutils: error while loading shared libraries: libacl.so.1: cannot change memory protections
-solace@myhost01[DEV][solace] $ 
+# tell SELinux this custom path should be labeled like the default container storage
+semanage fcontext -a -e /var/lib/containers /app/solace/podman/graphroot
+restorecon -R -v /app/solace/podman/graphroot
+
+# the runroot too (runtime state needs the right label as well)
+semanage fcontext -a -e /var/run/containers/storage /app/solace/podman/runroot 2>/dev/null \
+  || semanage fcontext -a -e /var/lib/containers /app/solace/podman/runroot
+restorecon -R -v /app/solace/podman/runroot
