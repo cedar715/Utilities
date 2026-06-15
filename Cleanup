@@ -1,9 +1,6 @@
-mkdir -p /etc/systemd/system/user@.service.d
-cat > /etc/systemd/system/user@.service.d/solace-limits.conf <<'EOF'
-[Service]
-LimitNOFILE=1048576
-LimitMEMLOCK=infinity
-LimitCORE=infinity
-EOF
-systemctl daemon-reload
-systemctl restart user@5011.service
+# the configured ceiling on the user manager unit (this is where our drop-in lands)
+systemctl show user@5011.service -p LimitNOFILE -p LimitMEMLOCK
+
+# and the ground truth — the actual limits the running manager has,
+# which everything it spawns (podman -> container) inherits
+cat /proc/$(pgrep -u solace -xo systemd)/limits | grep -iE 'open files|locked memory'
