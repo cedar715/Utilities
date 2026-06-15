@@ -1,2 +1,3 @@
-ls -laZd /app/solace/podman/graphroot
-ls -laZd /app/solace/podman/graphroot/overlay 2>/dev/null
+systemctl --user restart solace.service
+systemctl --user status solace.service
+podman logs solace 2>&1 | tail -40
