@@ -1,7 +1,3 @@
-SOLACE_UID=$(id -u solace)
-runsolace() {
-  sudo -u solace env \
-    XDG_RUNTIME_DIR=/run/user/$SOLACE_UID \
-    DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$SOLACE_UID/bus \
-    "$@"
-}
+loginctl show-user solace -p Linger        # Linger=yes
+ls -ld /run/user/$SOLACE_UID               # must exist (linger created it)
+runsolace systemctl --user is-system-running   # running/degraded = good; "Failed to connect to bus" = stop
