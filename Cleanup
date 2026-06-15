@@ -1,3 +1,10 @@
-cat /etc/subuid | grep -E '^solace|^5011'
-cat /etc/subgid | grep -E '^solace|^5011'
-podman unshare cat /proc/self/uid_map
+solace@myhost01[DEV][~] $ cat /etc/subuid | grep -E '^solace|^5011'
+solace:755360:65536
+solacex:820896:65536
+solace@myhost01[DEV][~] $ cat /etc/subgid | grep -E '^solace|^5011'
+solace:755360:65536
+solacex:820896:65536
+solace@myhost01[DEV][~] $ podman unshare cat /proc/self/uid_map
+         0       5011          1
+         1     755360      65536
+solace@myhost01[DEV][~] $ 
