@@ -1,8 +1,2 @@
-# tell SELinux this custom path should be labeled like the default container storage
-semanage fcontext -a -e /var/lib/containers /app/solace/podman/graphroot
-restorecon -R -v /app/solace/podman/graphroot
-
-# the runroot too (runtime state needs the right label as well)
-semanage fcontext -a -e /var/run/containers/storage /app/solace/podman/runroot 2>/dev/null \
-  || semanage fcontext -a -e /var/lib/containers /app/solace/podman/runroot
-restorecon -R -v /app/solace/podman/runroot
+ls -laZd /app/solace/podman/graphroot
+ls -laZd /app/solace/podman/graphroot/overlay 2>/dev/null
