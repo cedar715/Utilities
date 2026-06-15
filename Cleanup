@@ -1,3 +1,1 @@
-systemctl --user daemon-reload
-systemctl --user enable --now solace.service
-systemctl --user status solace.service
+1 podman-compose[3170868]: [solace] | Error: OCI runtime error: unable to start container fec5df83edaa697786830548e325e7f640d32261e791b7655054e55d763cec21: crun: setresuid to `1000001`: Inval
