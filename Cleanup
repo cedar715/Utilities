@@ -1,4 +1,4 @@
-appadmintemp@myhost01[DEV][~] $ ls -laZd /app/solace/podman/graphroot
-drwx------. 9 solace solace unconfined_u:object_r:container_var_lib_t:s0 4096 Jun 16 04:49 /app/solace/podman/graphroot
-appadmintemp@myhost01[DEV][~] $ 
-
+# did the children get relabeled, or just the top dir?
+ls -laZ /app/solace/podman/graphroot/overlay 2>/dev/null | head
+# force it again and WATCH for "Relabeled" lines — silence means nothing matched
+restorecon -R -v /app/solace/podman/graphroot
