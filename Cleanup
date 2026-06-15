@@ -1,7 +1,9 @@
-# A — trivial exec, with the UID override so it gets past setresuid
-podman run --rm -u 1000:1000 \
-  artifactory.global.standardchartered.com/gv-images-products/oss/solace-pubsub-enterprise:10.25.0.217 /bin/echo works
-
-# B — same, plus relaxed seccomp
-podman run --rm -u 1000:1000 --security-opt seccomp=unconfined \
-  artifactory.global.standardchartered.com/gv-images-products/oss/solace-pubsub-enterprise:10.25.0.217 /bin/echo works
+solace@myhost01[DEV][solace] $ podman run --rm -u 1000:1000 \
+  artifactory.global.example.com/gv-images-products/oss/solace-pubsub-enterprise:10.25.0.217 /bin/echo works
+ERROR: ld.so: object '/usr/sw/loads/currentload/lib64/altsyslog.so' from /etc/ld.so.preload cannot be preloaded (cannot change memory protections): ignored.
+/usr/bin/coreutils: error while loading shared libraries: libacl.so.1: cannot change memory protections
+solace@myhost01[DEV][solace] $ podman run --rm -u 1000:1000 --security-opt seccomp=unconfined \
+  artifactory.global.example.com/gv-images-products/oss/solace-pubsub-enterprise:10.25.0.217 /bin/echo works
+ERROR: ld.so: object '/usr/sw/loads/currentload/lib64/altsyslog.so' from /etc/ld.so.preload cannot be preloaded (cannot change memory protections): ignored.
+/usr/bin/coreutils: error while loading shared libraries: libacl.so.1: cannot change memory protections
+solace@myhost01[DEV][solace] $ 
