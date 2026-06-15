@@ -1,33 +1,57 @@
-#!/usr/bin/env bash
-# clean-slate.sh
-# Run on EACH of the 3 VMs, as the `solace` user, inside a REAL session:
-#   sudo machinectl shell solace@.host    (NOT runuser / su -)
-# Safe: pre-prod, no real data. Wipes broker data + rootless podman state.
-# Does NOT touch host substrate (cgroup v2, linger, rlimits) — those stay.
-set -uo pipefail
+# solace-compose.yml  — ROOTLESS, single broker (substrate proof).
+# Place at: /home/solace/solace/solace-compose.yml
+# Get ONE broker green this way first. It proves cgroup v2 + real user
+# session + rlimits are correct. THEN add the HA env block at the bottom.
+#
+# No `restart:` key on purpose — the systemd --user unit is the supervisor.
 
-echo "== 1. stop + disable the broker user unit (if present) =="
-systemctl --user stop    solace.service 2>/dev/null || true
-systemctl --user disable solace.service 2>/dev/null || true
+services:
+  solace:
+    image: docker.io/solace/solace-pubsub-standard:10.11.1.167
+    container_name: solace
+    hostname: solace1
+    shm_size: 1g
+    ulimits:
+      core: -1
+      memlock: -1
+      nofile:
+        soft: 2448
+        hard: 42192          # must be <= solace user's hard nofile
+    ports:
+      - "8080:8080"          # SEMP / mgmt
+      - "1943:1943"          # SEMP TLS
+      - "55555:55555"        # SMF
+      - "55003:55003"        # SMF compressed
+      - "55443:55443"        # SMF TLS
+      - "8008:8008"          # web messaging
+      - "2222:2222"          # SSH CLI
+    volumes:
+      - ./storage-group:/var/lib/solace:Z   # :Z keeps SELinux enforcing
+    environment:
+      username_admin_globalaccesslevel: admin
+      username_admin_password: admin
+      system_scaling_maxconnectioncount: "100"
 
-echo "== 2. tear down the compose stack =="
-( cd "$HOME/solace" 2>/dev/null && \
-  "$HOME/.local/bin/podman-compose" -f solace-compose.yml down ) 2>/dev/null || true
-
-echo "== 3. reset rootless podman for this user (containers/pods/networks/volumes/images) =="
-podman pod rm -af  2>/dev/null || true
-podman rm -af      2>/dev/null || true
-podman system reset --force            # nuclear, clean. you will re-pull the image after.
-
-echo "== 4. WIPE storage-group (REQUIRED: config keys only apply vs EMPTY storage) =="
-rm -rf "$HOME/solace/storage-group"
-mkdir -p "$HOME/solace/storage-group"
-
-echo "== 5. check for STRAY ROOTFUL containers from earlier tests =="
-echo "   (if anything lists below, clean it with the two sudo lines beneath)"
-sudo podman ps -a 2>/dev/null || true
-# sudo podman rm -af
-# sudo podman system reset --force
-
-echo
-echo "== DONE on $(hostname). Re-pull image, then verify substrate before bring-up. =="
+  # =====================================================================
+  # HA TRIPLET — only after the single node above comes up clean.
+  # For HA you MUST switch to host networking (podman bridge does not
+  # carry Solace redundancy), and drop the ports: block (ignored on host net):
+  #
+  #   network_mode: host
+  #   uts: host
+  #
+  # ...and add per-node env (this is the part that was already roughly
+  # right in your earlier compose — the substrate was the blocker):
+  #   routername: solace1
+  #   configsync_enable: "yes"           # primary/backup only, NOT monitor
+  #   redundancy_enable: "yes"
+  #   redundancy_group_password: "<shared>"
+  #   redundancy_activestandbyrole: primary   # primary|backup; OMIT on monitor
+  #   redundancy_matelink_connectvia: <mate-ip>   # OMIT on monitor
+  #   redundancy_group_node_<pri>_nodetype: message_routing
+  #   redundancy_group_node_<pri>_connectvia: <pri-ip>
+  #   redundancy_group_node_<bkp>_nodetype: message_routing
+  #   redundancy_group_node_<bkp>_connectvia: <bkp-ip>
+  #   redundancy_group_node_<mon>_nodetype: monitoring
+  #   redundancy_group_node_<mon>_connectvia: <mon-ip>
+  # =====================================================================
