@@ -1,2 +1,5 @@
-solace@cnlvatfss001[DEV][~] $ podman exec -it solace cli
-Error: crun: setrlimit `RLIMIT_MEMLOCK`: Operation not permitted: OCI permission denied
+systemctl --user restart solace.service
+sleep 25
+cat /proc/$(podman inspect -f '{{.State.Pid}}' solace)/limits | grep -iE 'open files|locked memory'
+# want: Max open files 1048576, Max locked memory unlimited
+podman exec solace echo works   # should now print "works", no setrlimit error
