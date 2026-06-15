@@ -1,1 +1,3 @@
-podman unshare chown -R 1000:1000 ~/solace/storage-group
+systemctl --user restart solace.service
+systemctl --user status solace.service
+podman exec solace sh -c 'id; ulimit -n; ulimit -l'
