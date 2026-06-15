@@ -1,47 +1,6 @@
-solace@myhost01[DEV][~] $ cat /proc/$(podman inspect -f '{{.State.Pid}}' solace)/limits | grep -iE 'open files|locked memory'
-Max open files            2448                 1048576              files     
-Max locked memory         unlimited            unlimited            bytes     
-solace@myhost01[DEV][~] $ podman exec solace echo works 
-works
-solace@myhost01[DEV][~] $ ssh -p 2222 admin@localhost
-^C
-solace@myhost01[DEV][~] $ podman exec -it solace cli
+# 1. is the unit set to come back on reboot? (linger + enabled = survives reboot)
+systemctl --user is-enabled solace.service     # want: enabled
+loginctl show-user solace -p Linger            # want: Linger=yes
 
-Solace PubSub+ Enterprise Version 10.25.0.217
-
-This Solace product is proprietary software of
-Solace Corporation. By accessing this Solace product
-you are agreeing to the license terms and conditions
-located at http://www.solace.com/license-software
-
-Copyright 2004-2026 Solace Corporation. All rights reserved.
-
-Operating Mode: Message Routing Node
-
-solace1> show redundancy
-Configuration Status     : Shutdown
-Redundancy Status        : Down
-Operating Mode           : Message Routing Node
-Switchover Mechanism     : Hostlist
-Auto Revert              : No
-Redundancy Mode          : N/A
-Active-Standby Role      : Primary
-Mate Router Name         : 
-ADB Link To Mate         : Down
-ADB Hello To Mate        : Down
-
-Interface        Static Address           Status
----------------- ------------------------ ------
-intf0            10.89.0.2                Up
-
-                               Primary Virtual Router  Backup Virtual Router
-                               ----------------------  ----------------------
-Activity Status                Local Active            Shutdown
-Redundancy Interface Status    Up                      
-VRRP Status                                            
-  intf0                        Initialize              
-VRRP Priority                  250                     
-Message Spool Status           AD-Active               
-Priority Reported By Mate      None                    
-
-solace1> 
+# 2. capture the exact compose that works, so the recipe is verbatim
+cat ~/solace/solace-compose.yml
