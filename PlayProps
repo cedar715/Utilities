@@ -1,2 +1,4 @@
-getent passwd solace          # check the shell field (last column): /sbin/nologin? /bin/bash?
-sudo cat /etc/sudoers.d/*     # what sudo rules mention solace, and who they're FOR
+appadmintemp@cnlvatfss001[DEV][~] $ getent passwd solace 
+solace:x:5011:5011:Application User:/home/solace:/bin/bash
+appadmintemp@cnlvatfss001[DEV][~] $ sudo cat /etc/sudoers.d/* 
+cat: '/etc/sudoers.d/*': No such file or directory
