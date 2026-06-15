@@ -1,1 +1,3 @@
-ls -l ~/.config/systemd/user/solace.service || cp /tmp/solace.service ~/.config/systemd/user/solace.service
+systemctl --user daemon-reload
+systemctl --user enable --now solace.service
+systemctl --user status solace.service
