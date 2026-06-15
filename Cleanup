@@ -1,4 +1,2 @@
-# did the children get relabeled, or just the top dir?
-ls -laZ /app/solace/podman/graphroot/overlay 2>/dev/null | head
-# force it again and WATCH for "Relabeled" lines — silence means nothing matched
-restorecon -R -v /app/solace/podman/graphroot
+podman run --rm -u 1000:1000 \
+  artifactory.global.example.com/gv-images-products/oss/solace-pubsub-enterprise:10.25.0.217 /bin/echo works
