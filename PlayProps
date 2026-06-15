@@ -1,26 +1,11 @@
-# solace.service  — ROOTLESS systemd USER unit (NOT a system unit).
-# Place at: /home/solace/.config/systemd/user/solace.service
-# This is what gives you "podman-compose under systemd" without rootful.
-#
-# Confirm your podman-compose path first:  which podman-compose
-# (your env had it at ~/.local/bin/podman-compose)
+ssh appadmintemp@<vm-ip>
 
-[Unit]
-Description=Solace PubSub+ broker (rootless podman-compose)
-After=default.target
+# --- substrate (needs sudo; this was the missing piece) ---
+stat -fc %T /sys/fs/cgroup            # want cgroup2fs; if tmpfs -> grubby + reboot first
+sudo loginctl enable-linger solace
+sudo podman ps -a                     # any stray ROOTFUL containers from earlier tests?
+# if yes: sudo podman rm -af && sudo podman system reset --force
 
-[Service]
-Type=simple
-WorkingDirectory=%h/solace
-# 'down' first cleans stale state ('-' ignores failure on first boot)
-ExecStartPre=-%h/.local/bin/podman-compose -f %h/solace/solace-compose.yml down
-# Foreground 'up' so systemd has something to supervise — never 'up -d'
-ExecStart=%h/.local/bin/podman-compose -f %h/solace/solace-compose.yml up
-ExecStop=%h/.local/bin/podman-compose -f %h/solace/solace-compose.yml down
-Restart=on-failure
-RestartSec=10
-TimeoutStartSec=600
-TimeoutStopSec=120
-
-[Install]
-WantedBy=default.target
+# --- make the files readable by solace ---
+chmod 644 /tmp/solace-compose.yml /tmp/solace.service
+chmod 755 /tmp/clean-slate.sh
