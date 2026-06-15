@@ -1,8 +1,10 @@
-solace@cnlvatfss001[DEV][~] $ echo $XDG_RUNTIME_DIR
+solace@myhost01[DEV][~] $ echo $XDG_RUNTIME_DIR      
 
-solace@cnlvatfss001[DEV][~] $ systemctl --user is-system-running
+solace@myhost01[DEV][~] $ echo $XDG_RUNTIME_DIR
+
+solace@myhost01[DEV][~] $ systemctl --user is-system-running
 Failed to connect to bus: No medium found
----
-export XDG_RUNTIME_DIR=/run/user/5011
-export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/5011/bus
-systemctl --user is-system-running
+solace@myhost01[DEV][~] $ export XDG_RUNTIME_DIR=/run/user/5011
+solace@myhost01[DEV][~] $ export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/5011/bus
+solace@myhost01[DEV][~] $ systemctl --user is-system-running
+running
