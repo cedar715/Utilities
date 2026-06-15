@@ -1,3 +1,22 @@
-systemctl --user restart solace.service
-systemctl --user status solace.service
-podman exec solace sh -c 'id; ulimit -n; ulimit -l'
+Run these in your solace session and paste the output. Working from broadest to most specific so we catch whatever layer it died at:
+bash# 1. systemd's view — why the unit thinks it's dead, and the exit code
+systemctl --user status solace.service --no-pager -l
+
+# 2. the actual failure text from the journal (last 80 lines)
+journalctl --user -u solace.service --no-pager -n 80
+The container almost certainly exited, so podman-compose may have already torn it down — that's why we also check for stopped containers, not just running ones:
+bash# 3. is the container present at all? -a shows stopped/exited ones too
+podman ps -a
+
+# 4. broker's own stdout/stderr (works even on an exited container)
+podman logs solace 2>&1 | tail -60
+If podman ps -a shows no solace container (compose cleaned it up on failure), grab the failure straight from a foreground run instead — this prints the OCI/startup error live without systemd swallowing it:
+bash# 5. run compose in the foreground so the real error is on screen
+cd ~/solace
+~/.local/bin/podman-compose -f solace-compose.yml up
+# let it fail, copy what prints, then Ctrl-C
+One targeted check while you're at it — the last fix was the user:/UID mapping, so confirm what podman actually resolved it to:
+bash# 6. did the user: line parse, and is storage ownership right?
+grep -n 'user:' ~/solace/solace-compose.yml
+podman unshare ls -lan ~/solace/storage-group
+Paste 1, 2, and 4 at minimum — and 5 if the container's already gone. That combination tells me whether it died on the UID mapping again, on a volume-permission error under /var/lib/solace, on memlock, or on something new. Don't apply any fix yet; let's read it first this time rather than stacking another change on top.
