@@ -1,10 +1,6 @@
-solace@myhost01[DEV][~] $ echo $XDG_RUNTIME_DIR      
+grep -q XDG_RUNTIME_DIR ~/.bashrc || cat >> ~/.bashrc <<'EOF'
 
-solace@myhost01[DEV][~] $ echo $XDG_RUNTIME_DIR
-
-solace@myhost01[DEV][~] $ systemctl --user is-system-running
-Failed to connect to bus: No medium found
-solace@myhost01[DEV][~] $ export XDG_RUNTIME_DIR=/run/user/5011
-solace@myhost01[DEV][~] $ export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/5011/bus
-solace@myhost01[DEV][~] $ systemctl --user is-system-running
-running
+# rootless systemd/podman session (linger-based)
+export XDG_RUNTIME_DIR=/run/user/$(id -u)
+export DBUS_SESSION_BUS_ADDRESS=unix:path=${XDG_RUNTIME_DIR}/bus
+EOF
