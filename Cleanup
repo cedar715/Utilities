@@ -1,7 +1,7 @@
-solace@cnlvatfss001[DEV][solace] $ podman run --rm artifactory.global.standardchartered.com/gv-images-products/oss/solace-pubsub-enterprise:10.25.0.217 /bin/echo works
-Error: OCI runtime error: crun: setresuid to `1000001`: Invalid argument
-solace@cnlvatfss001[DEV][solace] $ podman run --rm --security-opt seccomp=unconfined \
+# A — trivial exec, with the UID override so it gets past setresuid
+podman run --rm -u 1000:1000 \
   artifactory.global.standardchartered.com/gv-images-products/oss/solace-pubsub-enterprise:10.25.0.217 /bin/echo works
-Error: OCI runtime error: crun: setresuid to `1000001`: Invalid argument
-solace@cnlvatfss001[DEV][solace] $ 
 
+# B — same, plus relaxed seccomp
+podman run --rm -u 1000:1000 --security-opt seccomp=unconfined \
+  artifactory.global.standardchartered.com/gv-images-products/oss/solace-pubsub-enterprise:10.25.0.217 /bin/echo works
