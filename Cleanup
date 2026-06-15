@@ -1,14 +1,3 @@
-# place files (you scp'd them to /tmp as appadmintemp)
-mkdir -p ~/solace ~/.config/systemd/user
-cp /tmp/solace-compose.yml ~/solace/
-cp /tmp/solace.service     ~/.config/systemd/user/
-
-# clean slate + image
-podman system reset --force
-rm -rf ~/solace/storage-group && mkdir -p ~/solace/storage-group
-podman pull docker.io/solace/solace-pubsub-standard:10.11.1.167
-
-# start via the manager
-systemctl --user daemon-reload
-systemctl --user enable --now solace.service
-systemctl --user status solace.service
+solace@cnlvatfss001[DEV][~] $ podman system reset --force
+ A "/home/solace/.config/containers/storage.conf" config file exists.
+Remove this file if you did not modify the configuration.
