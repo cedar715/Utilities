@@ -1,6 +1,14 @@
-grep -q XDG_RUNTIME_DIR ~/.bashrc || cat >> ~/.bashrc <<'EOF'
+# place files (you scp'd them to /tmp as appadmintemp)
+mkdir -p ~/solace ~/.config/systemd/user
+cp /tmp/solace-compose.yml ~/solace/
+cp /tmp/solace.service     ~/.config/systemd/user/
 
-# rootless systemd/podman session (linger-based)
-export XDG_RUNTIME_DIR=/run/user/$(id -u)
-export DBUS_SESSION_BUS_ADDRESS=unix:path=${XDG_RUNTIME_DIR}/bus
-EOF
+# clean slate + image
+podman system reset --force
+rm -rf ~/solace/storage-group && mkdir -p ~/solace/storage-group
+podman pull docker.io/solace/solace-pubsub-standard:10.11.1.167
+
+# start via the manager
+systemctl --user daemon-reload
+systemctl --user enable --now solace.service
+systemctl --user status solace.service
