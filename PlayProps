@@ -1,57 +1,26 @@
-# solace-compose.yml  — ROOTLESS, single broker (substrate proof).
-# Place at: /home/solace/solace/solace-compose.yml
-# Get ONE broker green this way first. It proves cgroup v2 + real user
-# session + rlimits are correct. THEN add the HA env block at the bottom.
+# solace.service  — ROOTLESS systemd USER unit (NOT a system unit).
+# Place at: /home/solace/.config/systemd/user/solace.service
+# This is what gives you "podman-compose under systemd" without rootful.
 #
-# No `restart:` key on purpose — the systemd --user unit is the supervisor.
+# Confirm your podman-compose path first:  which podman-compose
+# (your env had it at ~/.local/bin/podman-compose)
 
-services:
-  solace:
-    image: docker.io/solace/solace-pubsub-standard:10.11.1.167
-    container_name: solace
-    hostname: solace1
-    shm_size: 1g
-    ulimits:
-      core: -1
-      memlock: -1
-      nofile:
-        soft: 2448
-        hard: 42192          # must be <= solace user's hard nofile
-    ports:
-      - "8080:8080"          # SEMP / mgmt
-      - "1943:1943"          # SEMP TLS
-      - "55555:55555"        # SMF
-      - "55003:55003"        # SMF compressed
-      - "55443:55443"        # SMF TLS
-      - "8008:8008"          # web messaging
-      - "2222:2222"          # SSH CLI
-    volumes:
-      - ./storage-group:/var/lib/solace:Z   # :Z keeps SELinux enforcing
-    environment:
-      username_admin_globalaccesslevel: admin
-      username_admin_password: admin
-      system_scaling_maxconnectioncount: "100"
+[Unit]
+Description=Solace PubSub+ broker (rootless podman-compose)
+After=default.target
 
-  # =====================================================================
-  # HA TRIPLET — only after the single node above comes up clean.
-  # For HA you MUST switch to host networking (podman bridge does not
-  # carry Solace redundancy), and drop the ports: block (ignored on host net):
-  #
-  #   network_mode: host
-  #   uts: host
-  #
-  # ...and add per-node env (this is the part that was already roughly
-  # right in your earlier compose — the substrate was the blocker):
-  #   routername: solace1
-  #   configsync_enable: "yes"           # primary/backup only, NOT monitor
-  #   redundancy_enable: "yes"
-  #   redundancy_group_password: "<shared>"
-  #   redundancy_activestandbyrole: primary   # primary|backup; OMIT on monitor
-  #   redundancy_matelink_connectvia: <mate-ip>   # OMIT on monitor
-  #   redundancy_group_node_<pri>_nodetype: message_routing
-  #   redundancy_group_node_<pri>_connectvia: <pri-ip>
-  #   redundancy_group_node_<bkp>_nodetype: message_routing
-  #   redundancy_group_node_<bkp>_connectvia: <bkp-ip>
-  #   redundancy_group_node_<mon>_nodetype: monitoring
-  #   redundancy_group_node_<mon>_connectvia: <mon-ip>
-  # =====================================================================
+[Service]
+Type=simple
+WorkingDirectory=%h/solace
+# 'down' first cleans stale state ('-' ignores failure on first boot)
+ExecStartPre=-%h/.local/bin/podman-compose -f %h/solace/solace-compose.yml down
+# Foreground 'up' so systemd has something to supervise — never 'up -d'
+ExecStart=%h/.local/bin/podman-compose -f %h/solace/solace-compose.yml up
+ExecStop=%h/.local/bin/podman-compose -f %h/solace/solace-compose.yml down
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=600
+TimeoutStopSec=120
+
+[Install]
+WantedBy=default.target
