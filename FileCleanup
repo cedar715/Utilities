@@ -1,5 +1,6 @@
-solace@cnlvatfss002[DEV][~] $ grep -i 'ExecStart\|WorkingDirectory\|-f ' ~/.config/systemd/user/solace.service
-WorkingDirectory=/home/solace/solace
-ExecStartPre=-/home/solace/.local/bin/podman-compose -f /home/solace/solace/solace-compose.yml down --timeout 60
-ExecStart=/home/solace/.local/bin/podman-compose -f /home/solace/solace/solace-compose.yml up
-ExecStop=/home/solace/.local/bin/podman-compose -f /home/solace/solace/solace-compose.yml down --timeout 120
+# are the two files the same, or different?
+diff /home/solace/solace-compose.yml /home/solace/solace/solace-compose.yml && echo "IDENTICAL" || echo "DIFFERENT"
+
+# which one has the 1001:0 / opt-apps problem?
+echo "=== home-dir copy ==="; grep -iE 'user:|device:|storage-group|solace_storage' /home/solace/solace-compose.yml
+echo "=== subdir (live) copy ==="; grep -iE 'user:|device:|storage-group|solace_storage' /home/solace/solace/solace-compose.yml
