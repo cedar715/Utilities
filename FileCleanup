@@ -1,13 +1,20 @@
-# from appadmintemp — the sudoers grant makes this work now
-sudo -u solace bash
-# you're now solace; set the session vars (needed for podman)
-export XDG_RUNTIME_DIR=/run/user/5011
-export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/5011/bus
-
 # on VM2 — what's actually in the storage-group the broker is auditing?
 podman unshare ls -lan /home/solace/solace/storage-group
-podman unshare ls -lan /home/solace/solace/storage-group/var 2>/dev/null
-podman unshare find /home/solace/solace/storage-group -maxdepth 2 -name '*soltr*' 2>/dev/null
+ls: cannot access '/home/solace/solace/storage-group': No such file or directory
+
 
 # on VM1 (the stable one) — same listing, to diff against
 podman unshare ls -lan /home/solace/solace/storage-group
+solace@vm1[DEV][~] $ podman unshare ls -lan /home/solace/solace/storage-group
+total 12
+drwxr-x---.   9 1000 1000  133 Jun 16 05:44 .
+drwxr-x---.   3    0    0   53 Jun 16 05:42 ..
+drwx------.  12 1000 1000 4096 Jun 16 05:44 config
+drwx------.   2 1000 1000 4096 Jun 16 05:44 diagnostics
+lrwxrwxrwx.   1 1000 1000   27 Jun 16 05:44 diags -> /var/lib/solace/diagnostics
+drwx------.   7 1000 1000  122 Jun 16 05:44 jail
+drwx------. 102 1000 1000 4096 Jun 16 05:44 spool
+drwx------.   2 1000 1000   58 Jun 16 05:44 spool-cache
+drwx------.   3 1000 1000   19 Jun 16 05:31 spool-cache-backup
+drwx------.   8 1000 1000  168 Jun 16 05:44 var
+
