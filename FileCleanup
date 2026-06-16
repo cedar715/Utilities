@@ -1,3 +1,22 @@
-solace@cnlvatfss002[DEV][~] $ systemctl --user stop solace.service
-solace@cnlvatfss002[DEV][~] $ grep -iE 'user:|volumes:|device:|storage-group' ~/solace/solace/solace-compose.yml
-grep: /home/solace/solace/solace/solace-compose.yml: No such file or directory
+# as solace on VM2
+systemctl --user stop solace.service
+
+# 1. EDIT ~/solace/solace/solace-compose.yml to VM1's model (above) — actually save it this time.
+#    Verify the edit took:
+grep -iE 'user:|volumes:|device:|storage-group' ~/solace/solace/solace-compose.yml
+#    should show user "1000:1000", "./storage-group:/var/lib/solace:Z", and NO device:/opt/apps line
+
+# 2. wipe BOTH leftover storage dirs (both are half-states, no real data)
+podman unshare rm -rf /home/solace/solace/storage-group
+rm -rf /opt/apps/solace/storage-group 2>/dev/null   # may need the unshare form if owned by mapped uid:
+podman unshare rm -rf /opt/apps/solace/storage-group 2>/dev/null
+
+# 3. create fresh at VM1's path, owned by container uid 1000 (unshare maps it correctly)
+mkdir -p /home/solace/solace/storage-group
+podman unshare chown 1000:1000 /home/solace/solace/storage-group
+
+# 4. start clean
+systemctl --user start solace.service
+sleep 30
+podman logs solace 2>&1 | tail -20
+curl -s -u admin:admin http://localhost:8080/SEMP/v2/monitor/about/api | grep -o 'responseCode.:.200'
