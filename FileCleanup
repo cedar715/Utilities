@@ -1,15 +1,15 @@
-solace@vm2[DEV][~] $ systemctl --user cat solace.service | grep -iE 'Type=|NotifyAccess|sdnotify|ExecStart|TimeoutStartSec'
-Environment=PSP_COMMON_ARGS_SDNOTIFY="--env=process=podman"
-TimeoutStartSec=600
-# broker_runtime=podman_compose: start via podman-compose (foreground, Type=simple).
-Type=simple
-ExecStartPre=-/home/solace/.local/bin/podman-compose -f /home/solace/solace/solace-compose.yml down --timeout 60
-ExecStart=/home/solace/.local/bin/podman-compose -f /home/solace/solace/solace-compose.yml up
-----
-#on VM1 (the stable one) — what does ITS unit say?
-systemctl --user cat solace.service | grep -iE 'Type=|ExecStart'
-solace@vm1[DEV][~] $ systemctl --user cat solace.service | grep -iE 'Type=|ExecStart'
-Type=simple
-ExecStartPre=-%h/.local/bin/podman-compose -f %h/solace/solace-compose.yml down
-ExecStart=%h/.local/bin/podman-compose -f %h/solace/solace-compose.yml up
+# stop the crash loop
+systemctl --user stop solace.service
 
+# wipe the stale storage (podman unshare so ownership/namespace is right)
+podman unshare rm -rf /home/solace/solace/storage-group
+mkdir -p /home/solace/solace/storage-group
+# re-apply container-UID ownership (the step the playbook's unshare role does)
+podman unshare chown -R 1000:1000 /home/solace/solace/storage-group
+
+# start fresh — broker initializes clean storage for THIS image version
+systemctl --user start solace.service
+
+# watch it get past the audit this time
+sleep 30
+podman logs solace 2>&1 | tail -30
