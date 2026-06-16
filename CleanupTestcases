@@ -1,6 +1,13 @@
-grep -rn 'become_method\|ansible_become_method\|become_user\|runuser\|ansible_user' \
-  group_vars/ inventories/ ansible.cfg roles/*/tasks/ | grep -iv '#'
+grep -rn 'become_user' roles/
 roles/admin_propagate_admin_sshkeys_to_solace_user/tasks/main.yml:21:- name: Add ado public key if not present - run as root become true and fix ownership, same effect as become_user without the su/sudo limitation
+roles/admin_propagate_admin_sshkeys_to_solace_user/tasks/main.yml:44:  #become_user: "{{ solace_local_service_user }}"
 roles/admin_setup_podman/tasks/main.yaml:45:  become_user: "{{ solace_local_service_user }}"
 roles/admin_setup_podman/tasks/main.yaml:59:  become_user: "{{ solace_local_service_user }}"
 roles/solace_backup_ondemand_aws/tasks/main.yml:32:  become_user: "{{ solace_local_service_user }}"
+roles/solace_compose/tasks/main.yml:12:# Runs as: become_user = solace_local_service_user (rootless)
+roles/solace_compose_start/tasks/main.yml:9:# Runs as: become_user = solace_local_service_user (rootless)
+roles/solace_compose_stop/tasks/main.yml:8:# Runs as: become_user = solace_local_service_user (rootless)
+roles/solace_compose_verify/tasks/main.yml:13:# Runs as: become_user = solace_local_service_user (rootless)
+roles/solace_replication_setup_semp/README.md:39:| `solace_local_service_user` | OS user for `become_user`; must have access to `/tmp/51080-meshconfig/`. |
+roles/solace_runtime_deploy/tasks/main.yml:6:# Runs as become_user: solace (rootless). Does NOT use become: true (root).
+roles/solace_scripts_readiness_setup/tasks/main.yml:55:# No become: false — runs as solace (play-level become_user), avoids /tmp permission issues.
