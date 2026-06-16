@@ -1,2 +1,3 @@
-# how do the EXISTING (non-compose) roles become/run as solace?
-grep -rn 'become_user\|become_method\|runuser\|su - solace\|ansible_become\|remote_user\|systemctl --user' roles/ group_vars/ | grep -iv compose
+ansible -i inventories/nonp/cn/cdc-dev1/hosts machine2 \
+  -b -m shell -a 'runuser -l solace -c "whoami; id -u"'
+#   want: solace / 5011, no timeout, no password
