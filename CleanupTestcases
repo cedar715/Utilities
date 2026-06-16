@@ -1,10 +1,6 @@
-site-ha-targeted.yml:97:  hosts: "{{ override_host | default( applicable_host | default('ha_servers') ) }}"
-site-ha-targeted.yml:98:  become: true
-site-ha-targeted.yml:99:  become_user: "{{ solace_local_service_user }}"
-site-ha-targeted-compose.yml:149:  become_user: "{{ solace_local_service_user }}"
-site-ha-targeted-compose.yml:156:  hosts: "{{ override_host | default( applicable_host | default('ha_servers') ) }}"
-site-ha-targeted-compose.yml:157:  become: true
-site-ha-targeted-compose.yml:158:  become_user: "{{ solace_local_service_user }}"
-site-ha-targeted-config-vpn.yml:2:  hosts: "{{ override_host | default( applicable_host | default('ha_primary_node') ) }}"
-site-ha-targeted-config-vpn.yml:3:  become: true
-site-ha-targeted-config-vpn.yml:4:  become_user: "{{ solace_local_service_user }}"
+# is become_method overridden globally?
+grep -rn 'become_method\|become_exe\|become_flags' ansible.cfg group_vars/ inventories/ 2>/dev/null
+cat ansible.cfg | grep -iA3 'become'
+
+# does prod use a different inventory/cred where appadmintemp CAN sudo-runas solace?
+#   (your NEW VMs have temp creds + Centrify; prod VMs may have a sudoers rule)
