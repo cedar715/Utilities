@@ -1,14 +1,8 @@
-ss -tlnp 2>/dev/null | grep ':2222' || sudo ss -tlnp | grep ':2222'
-
-# with sudo, you'll see it again
-sudo ss -tlnp | grep ':2222'
-
-# or check the service directly
-systemctl is-active sshd     # active
-
-
-systemctl --user start solace.service
-sleep 30
-podman ps                            # solace = Up (not Created)
-podman logs solace 2>&1 | tail -15
+# the real proof — SEMP answers
 curl -s -u admin:admin http://localhost:8080/SEMP/v2/monitor/about/api | grep -o 'responseCode.:.200'
+
+# POST passed, broker fully booted (not just container Up)
+podman logs solace 2>&1 | grep -iE 'platform type|pre-startup'
+
+# and the stability test — still up in a few minutes = loop is truly dead
+sleep 120 && systemctl --user is-active solace.service && podman ps --format '{{.Names}} {{.Status}}'
