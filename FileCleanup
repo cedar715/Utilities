@@ -1,10 +1,8 @@
-cd /home/solace/solace
-systemctl --user stop solace.service
+# wipe the half-states from earlier attempts
+podman unshare rm -rf /home/solace/solace/storage-group
+podman unshare rm -rf /opt/apps/solace/storage-group 2>/dev/null
 
-# park both confusing VM2 files out of the way
-mv solace-compose.yml solace-compose.yml.ghcp-bad 2>/dev/null
-mv /home/solace/solace-compose.yml /home/solace/solace-compose.yml.homedir-bak 2>/dev/null
-
-# create the live file fresh from VM1's content
-vi /home/solace/solace/solace-compose.yml
-#   paste VM1's content, then change ONLY:  hostname: solace1  ->  hostname: solace2
+# fresh storage at VM1's path, owned 1000:1000
+mkdir -p /home/solace/solace/storage-group
+podman unshare chown 1000:1000 /home/solace/solace/storage-group
+podman unshare ls -lan /home/solace/solace/storage-group   # total 0, owner 1000 1000
