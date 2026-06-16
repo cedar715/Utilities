@@ -1,13 +1,15 @@
-# is the existing broker a USER unit? (it will be)
-systemctl --user list-unit-files | grep -i solace
-ls -l ~/.config/systemd/user/*solace* 2>/dev/null
-
-# is linger on for solace?
-loginctl show-user "$(id -un)" -p Linger
-
-# what's running, under whom (you, solace)
-systemctl --user list-units --type=service | grep -i solace
-podman ps
-
-# your rootless storage
-podman info --format '{{.Store.GraphRoot}}'
+solace@myvm[~] $ systemctl --user list-unit-files | grep -i solace
+solace.service                                                                       enabled   disabled
+solace@myvm[~] $ ls -l ~/.config/systemd/user/*solace* 2>/dev/null
+-rw-r--r--. 1 solace solace 6512 Mar 19 13:14 /home/solace/.config/systemd/user/solace.service
+solace@myvm[~] $ loginctl show-user "$(id -un)" -p Linger
+Linger=yes
+solace@myvm[~] $ systemctl --user list-units --type=service | grep -i solace
+● ondemand_backup.service        loaded failed failed  Backup utility for Solace broker
+  solace.service                 loaded active running PubSub+ Container
+solace@myvm[~] $ podman ps
+CONTAINER ID  IMAGE                                                                                                 COMMAND            CREATED       STATUS       PORTS       NAMES
+79892318851d  artifactory.global.example.com/gv-images-products/oss/solace-pubsub-enterprise:10.11.1.279  /usr/sbin/boot.sh  2 months ago  Up 2 months              solace
+solace@myvm[~] $ podman info --format '{{.Store.GraphRoot}}'
+/app/solace/podman/graphroot
+solace@myvm[~] $
