@@ -1,19 +1,45 @@
-# 1. ansible can reach VM2 and become root there
-ansible -i inventories/nonp/cn/cdc-dev1/hosts cdc-dev1-b.appid.cn.app.example.com -m ping
-ansible -i inventories/nonp/cn/cdc-dev1/hosts cdc-dev1-b.appid.cn.app.example.com -b -m command -a 'id'   # shows uid=0 if become works
+appadmintemp@vm3 $ ansible -i inventories/nonp/cn/cdc-dev1/hosts machine2 -b -m command -a 'id'
+machine2 | CHANGED | rc=0 >>
+uid=0(root) gid=0(root) groups=0(root) context=unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023
 
-# 2. THE Centrify check — does become to solace work? (this is the one that bit you manually)
-ansible -i inventories/nonp/cn/cdc-dev1/hosts cdc-dev1-b.appid.cn.app.example.com \
+appadmintemp@vm3 $ ansible -i inventories/nonp/cn/cdc-dev1/hosts machine2 \
   -b --become-user solace -m command -a 'whoami'
-#   prints "solace" = good. "not allowed to execute ... as solace" = sudo path blocked,
-#   you need become_method: su (we discussed) — FIX before running the play.
+machine2 | FAILED | rc=-1 >>
+Missing sudo password
 
-# 3. the wipe/reinit flag name GHCP actually generated (so you wipe stale VM2 data)
-grep -rn 'force_reinit\|reinit\|wipe\|storage.*state\|first.*boot' roles/ playbooks/ group_vars/
 
-# 4. vault values exist (PSK + admin password) or the play will fail templating
-grep -rn 'vault_' inventories/ group_vars/
+appadmintemp@vm3 $ grep -rn 'force_reinit\|reinit\|wipe\|storage.*state\|first.*boot' roles/ site-*.yml inventories/
+roles/solace_compose/defaults/main.yml:19:# DESTRUCTIVE GUARD: set to true ONLY when you want to wipe existing broker
+roles/solace_compose/defaults/main.yml:20:# storage and force a clean first-boot (e.g. initial HA bring-up on empty VMs).
+roles/solace_compose/defaults/main.yml:22:solace_force_reinit: false
+roles/solace_compose_start/tasks/main.yml:31:# ── First-boot / reinit guard ─────────────────────────────────────────────────
+roles/solace_compose_start/tasks/main.yml:32:# CONSTRAINT: Solace applies redundancy config ONLY on first boot against EMPTY
+roles/solace_compose_start/tasks/main.yml:33:# storage. Do NOT wipe on every run — that would destroy a live broker.
+roles/solace_compose_start/tasks/main.yml:34:# Gate the wipe on solace_force_reinit=true (explicit operator intent).
+roles/solace_compose_start/tasks/main.yml:46:      on first boot against empty storage. If you need a clean HA bring-up, set
+roles/solace_compose_start/tasks/main.yml:47:      solace_force_reinit=true (DESTRUCTIVE: wipes all broker data).
+roles/solace_compose_start/tasks/main.yml:50:    - not (solace_force_reinit | default(false) | bool)
+roles/solace_compose_start/tasks/main.yml:52:- name: "[compose-start] DESTRUCTIVE WIPE — remove storage for clean first boot (solace_force_reinit=true)"
+roles/solace_compose_start/tasks/main.yml:56:  when: solace_force_reinit | default(false) | bool
+roles/solace_compose_start/tasks/main.yml:58:- name: "[compose-start] Re-create storage directory after wipe"
+roles/solace_compose_start/tasks/main.yml:63:  when: solace_force_reinit | default(false) | bool
+roles/solace_compose_start/tasks/main.yml:65:- name: "[compose-start] Re-run podman unshare chown after wipe"
+roles/solace_compose_start/tasks/main.yml:68:  when: solace_force_reinit | default(false) | bool
+site-ha-targeted-compose.yml:39:# First clean HA bring-up (wipes storage — use once on empty VMs):
+site-ha-targeted-compose.yml:43:#     -e "admin_pwd=<vault> solace_force_reinit=true applicable_host=ha_servers"
 
-# 5. confirm the two make-or-break tasks are even in the generated code
-grep -rn 'user@.service\|LimitNOFILE\|solace-limits' roles/ playbooks/   # the limits drop-in
-grep -rn 'fcontext\|restorecon\|container_var_lib' roles/ playbooks/      # the SELinux relabel
+
+appadmintemp@vm3 $ grep -rn 'vault_' inventories/ group_vars/
+appadmintemp@vm3 $
+
+
+appadmintemp@vm3 $ grep -rn 'user@.service\|LimitNOFILE\|solace-limits' roles/ site-*.yml
+roles/admin_solace_config_system_enablement/tasks/main.yml:17:#    sed -i 's/#DefaultLimitNOFILE=1024:524288/#DefaultLimitNOFILE=2448:1048576/g' /etc/systemd/system.conf
+appadmintemp@vm3 $
+
+appadmintemp@vm3 $ grep -rn 'fcontext\|restorecon\|container_var_lib' roles/  site-*.yml
+roles/admin_config_rootless_solace_user/tasks/main.yml:100:    sudo semanage fcontext -a -e /var/lib/containers/storage {{ podman.storage.graphroot }} 
+roles/admin_config_rootless_solace_user/tasks/main.yml:101:    sudo restorecon -R -v {{ podman.storage.graphroot }}
+roles/solace_files_directory_delete_incl_storage/tasks/main.yml:108:    # sudo semanage fcontext -d -e /var/lib/containers/storage {{ podman.storage.graphroot }}
+
+
