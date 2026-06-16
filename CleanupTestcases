@@ -1,2 +1,23 @@
-grep -rn 'nofile\|1048576\|ulimits' roles/solace_systemd/templates/   # compose file must set hard nofile 1048576
-grep -rn 'user@.service\|LimitNOFILE\|solace-limits' roles/            # provisioning must set the ceiling
+echo "=== A1. cgroup v2 (must be cgroup2fs) ==="
+stat -fc %T /sys/fs/cgroup
+
+echo "=== A2. user manager limits ceiling (must be 1048576 / infinity) ==="
+systemctl show user@5011.service -p LimitNOFILE -p LimitMEMLOCK
+ls -l /etc/systemd/system/user@.service.d/ 2>/dev/null && \
+  cat /etc/systemd/system/user@.service.d/*.conf 2>/dev/null || \
+  echo ">>> NO drop-in found — POST will fail nofile. Must create before deploy."
+
+echo "=== A3. linger for solace (must be Linger=yes) ==="
+loginctl show-user solace -p Linger
+
+echo "=== A4. subuid/subgid range for solace (need a >=65536 range) ==="
+grep solace /etc/subuid /etc/subgid
+
+echo "=== A5. SELinux label on graphroot (must be container_var_lib_t) ==="
+ls -laZd /app/solace/podman/graphroot 2>/dev/null || echo ">>> graphroot missing — check storage.conf path"
+
+echo "=== A6. graphroot mount is NOT noexec (must NOT list noexec) ==="
+findmnt -T /app/solace/podman/graphroot -o TARGET,FSTYPE,OPTIONS
+
+echo "=== A7. firewalld: HA ports open between the 3 VMs (for HA stage; ok if not yet) ==="
+firewall-cmd --list-ports 2>/dev/null | tr ' ' '\n' | grep -E '8300|8301|8302|8741|55555' || echo "HA ports not open yet (only needed at HA stage)"
