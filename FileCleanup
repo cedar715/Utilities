@@ -1,22 +1,2 @@
-solace@cnlvatfss002[DEV][solace] $ podman logs solace 2>&1 | tail -30
-solace@cnlvatfss002[DEV][solace] $ grep -iE 'user:|hostname:|/var/lib/solace|storage-group|device:|solace_storage|secrets|extra_hosts' /home/solace/solace/solace-compose.yml
-    hostname: solace2
-    user: "1000:1000"  
-      - ./storage-group:/var/lib/solace:Z   # :Z keeps SELinux enforcing
-solace@cnlvatfss002[DEV][solace] $ podman unshare ls -lan /home/solace/solace/storage-group | head -4
-total 0
-drwxr-x---. 2 1000 1000  6 Jun 17 00:38 .
-drwxr-xr-x. 3    0    0 88 Jun 17 00:38 ..
-solace@cnlvatfss002[DEV][solace] $ systemctl --user status solace.service --no-pager | grep -E 'Active:|Main PID:|status='
-     Active: active (running) since Wed 2026-06-17 00:45:20 CST; 2s ago
-    Process: 3280730 ExecStartPre=/home/solace/.local/bin/podman-compose -f /home/solace/solace/solace-compose.yml down --timeout 60 (code=exited, status=0/SUCCESS)
-   Main PID: 3280795 (podman-compose)
-solace@cnlvatfss002[DEV][solace] $ podman ps -a
-CONTAINER ID  IMAGE       COMMAND     CREATED     STATUS      PORTS       NAMES
-solace@cnlvatfss002[DEV][solace] $ systemctl --user status solace.service --no-pager | grep -E 'Active:|Main PID:|status='
-     Active: active (running) since Wed 2026-06-17 00:45:51 CST; 676ms ago
-    Process: 3283997 ExecStartPre=/home/solace/.local/bin/podman-compose -f /home/solace/solace/solace-compose.yml down --timeout 60 (code=exited, status=0/SUCCESS)
-   Main PID: 3284060 (podman-compose)
-solace@cnlvatfss002[DEV][solace] $ podman logs solace 2>&1 | tail -30
-solace@cnlvatfss002[DEV][solace] $ 
-
+# does the compose file even parse as valid YAML?
+python3 -c "import yaml; yaml.safe_load(open('/home/solace/solace/solace-compose.yml')); print('YAML OK')"
