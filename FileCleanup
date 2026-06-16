@@ -1,1 +1,5 @@
-grep -i 'ExecStart\|WorkingDirectory\|-f ' ~/.config/systemd/user/solace.service
+solace@cnlvatfss002[DEV][~] $ grep -i 'ExecStart\|WorkingDirectory\|-f ' ~/.config/systemd/user/solace.service
+WorkingDirectory=/home/solace/solace
+ExecStartPre=-/home/solace/.local/bin/podman-compose -f /home/solace/solace/solace-compose.yml down --timeout 60
+ExecStart=/home/solace/.local/bin/podman-compose -f /home/solace/solace/solace-compose.yml up
+ExecStop=/home/solace/.local/bin/podman-compose -f /home/solace/solace/solace-compose.yml down --timeout 120
