@@ -1,3 +1,6 @@
-TASK [admin_setup_podman : Install podman-compose for the solace user] ****************************************************************************************************************************************************
-fatal: [machine2]: FAILED! => {"changed": false, "changed_when_result": "The conditional check ''already installed' not in _podman_compose_install.stdout' failed. The error was: error while evaluating conditional ('already installed' not in _podman_compose_install.stdout): 'dict object' has no attribute 'stdout'. 'dict object' has no attribute 'stdout'", "module_stderr": "Shared connection to cnlvatfss002.cn.standardchartered.com closed.\r\n", "module_stdout": "\r\n", "msg": "MODULE FAILURE\nSee stdout/stderr for the exact error", "rc": 1}
-
+# as appadmintemp, become solace (now works via the sudoers grant)
+sudo -u solace bash -c '
+  python3 -c "import podman_compose" 2>/dev/null && echo "already installed" && exit 0
+  python3 -m pip install podman-compose --user --index-url <your py_artifactory value>
+'
+echo "exit=$?"
