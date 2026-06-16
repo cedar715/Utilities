@@ -1,3 +1,4 @@
-# as solace on VM1, after: su - solace ; export the two XDG vars
-systemctl --user is-active solace.service        # active
-curl -s -u admin:admin http://localhost:8080/SEMP/v2/monitor/about/api | grep -o responseCode.:.200
+stat -fc %T /sys/fs/cgroup                                    # want: cgroup2fs
+getent passwd solace | cut -d: -f3,6,7                        # uid, home, shell — expect 5011, /home/solace, /bin/bash
+cat /etc/subuid | grep solace                                 # note the range start (VM1 was 755360:65536)
+ls -laZd /app/solace/podman/graphroot 2>/dev/null || echo "graphroot not at /app — check storage.conf"
