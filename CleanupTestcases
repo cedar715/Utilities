@@ -1,4 +1,10 @@
-# as appadmintemp
-   sudo cat /home/solace/.ssh/authorized_keys | grep -c .   # >0 = key(s) present
-
-ansible -i inventories/nonp/cn/cdc-dev1 ha_backup_node -u solace -m ping
+site-ha-targeted.yml:97:  hosts: "{{ override_host | default( applicable_host | default('ha_servers') ) }}"
+site-ha-targeted.yml:98:  become: true
+site-ha-targeted.yml:99:  become_user: "{{ solace_local_service_user }}"
+site-ha-targeted-compose.yml:149:  become_user: "{{ solace_local_service_user }}"
+site-ha-targeted-compose.yml:156:  hosts: "{{ override_host | default( applicable_host | default('ha_servers') ) }}"
+site-ha-targeted-compose.yml:157:  become: true
+site-ha-targeted-compose.yml:158:  become_user: "{{ solace_local_service_user }}"
+site-ha-targeted-config-vpn.yml:2:  hosts: "{{ override_host | default( applicable_host | default('ha_primary_node') ) }}"
+site-ha-targeted-config-vpn.yml:3:  become: true
+site-ha-targeted-config-vpn.yml:4:  become_user: "{{ solace_local_service_user }}"
