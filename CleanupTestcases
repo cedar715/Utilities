@@ -4,3 +4,22 @@ ansible-playbook site-admin-setup.yml \
   --extra-vars 'ansible_ssh_pass=<mysecret>' \
   --extra-vars 'ansible_become_pass=<mysecret>' \
   -e "applicable_host=ha_backup_node"
+
+
+# ── podman-compose (pip, installed as solace user) ────────────────────────────
+# Required for deployment_mode=podman-compose in the ADO pipeline.
+# Installed --user so it lives in /home/solace/.local/bin/podman-compose.
+# Uses the internal Artifactory PyPI mirror (same pattern as solace_ansible_pip_addon).
+- name: Install podman-compose for the solace user
+  ansible.builtin.shell: |
+    python3 -c "import podman_compose" 2>/dev/null && echo "already installed" && exit 0
+    python3 -m pip install podman-compose --user --index-url {{ py_artifactory }}
+  become: true
+  become_user: "{{ solace_local_service_user }}"
+  args:
+    executable: /bin/bash
+  register: _podman_compose_install
+  changed_when: "'already installed' not in _podman_compose_install.stdout"
+
+TASK [admin_setup_podman : Install podman-compose for the solace user] ****************************************************************************************************************************************************
+fatal: [machine2]: FAILED! => {"msg": "Missing sudo password"}
