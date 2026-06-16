@@ -1,3 +1,9 @@
+# from appadmintemp — the sudoers grant makes this work now
+sudo -u solace bash
+# you're now solace; set the session vars (needed for podman)
+export XDG_RUNTIME_DIR=/run/user/5011
+export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/5011/bus
+
 # on VM2 — what's actually in the storage-group the broker is auditing?
 podman unshare ls -lan /home/solace/solace/storage-group
 podman unshare ls -lan /home/solace/solace/storage-group/var 2>/dev/null
