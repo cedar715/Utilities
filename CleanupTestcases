@@ -1,27 +1,79 @@
-# however you get into solace on VM2 — direct login, or root->su per the existing model
-export XDG_RUNTIME_DIR=/run/user/5011
-export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/5011/bus
+You are extending an existing, battle-tested Ansible repo that deploys Solace
+PubSub+ in a 3-node HA group (primary/backup/monitor) on hardened RHEL VMs.
+The CURRENT, working flow deploys the broker via `podman run` driven by a
+systemd unit. There are existing, prod-proven roles that (a) harden the VM and
+(b) do all Solace pre-reqs. DO NOT modify or break those.
 
-echo "=== B1. user systemd manager reachable (must say running/degraded) ==="
-systemctl --user is-system-running
+GOAL: add a NEW, PARALLEL deployment flow that deploys the same broker via
+`podman-compose` under a systemd unit, selectable by a single variable
+(e.g. solace_runtime: podman_run | podman_compose). The podman_run path must
+remain the untouched default. Both paths must reuse the SAME hardening role,
+pre-req role, inventory, group_vars, broker names, ports, and HA topology.
 
-echo "=== B2. podman works rootless + storage driver/root ==="
-podman info --format 'driver={{.Store.GraphDriverName}} graphroot={{.Store.GraphRoot}} runroot={{.Store.RunRoot}}'
+STEP 1 — before writing anything, inspect the repo and report back:
+  - the role/playbook layout and naming conventions
+  - how the existing podman_run command and its systemd unit are templated
+  - where broker names, ports, ulimits, and HA redundancy vars are defined
+  - the group_vars structure under inventories/<env>/<region>/<site>/
+Mirror ALL of these exactly. Mirror them; do not invent a new style.
 
-echo "=== B3. podman-compose present + path (unit references this path) ==="
-which podman-compose || ls -l ~/.local/bin/podman-compose
+STEP 2 — generate the podman_compose flow. It must produce, per node:
+  - templates/solace-compose.yml.j2   (the compose file)
+  - templates/solace-compose.service.j2 (systemd --user unit, Type=simple,
+    foreground `podman-compose up`, ExecStop `down`)
+  - a tasks file gated on solace_runtime == 'podman_compose'
 
-echo "=== B4. subuid mapping actually works (no setresuid error) ==="
-podman unshare cat /proc/self/uid_map
+These are ROOTLESS, systemd --user, and were proven by hand on one VM. Bake in
+exactly the following hard-won requirements (do not "simplify" them away):
+  - Runs rootless as the `solace` service user via a systemd --user unit;
+    linger enabled; container started ONLY by `systemctl --user`, never by
+    invoking podman-compose directly.
+  - compose service sets:  user: "1000:1000"   (image default UID 1000001
+    overflows the rootless subuid range and fails setresuid)
+  - ulimits: nofile soft 2448 / hard 1048576 (Solace POST requires the 1048576
+    hard limit). NO memlock key in compose (it breaks `podman exec`); memlock
+    comes from a LimitMEMLOCK=infinity drop-in on user@<uid>.service instead.
+  - shm_size: 1g
+  - a host prerequisite task that creates
+    /etc/systemd/system/user@.service.d/solace-limits.conf with
+    LimitNOFILE=1048576 / LimitMEMLOCK=infinity / LimitCORE=infinity, then
+    restarts user@<uid>.service. (Rootless cannot exceed the user manager
+    ceiling, so this must be set BEFORE the broker starts.)
+  - a host prerequisite task that, IF podman graphroot/runroot are relocated
+    off the default (read storage.conf), applies the matching SELinux fcontext
+    equivalence to /var/lib/containers and runs restorecon — otherwise the
+    container's libraries fail to load ("cannot change memory protections").
+  - storage-group bind-mounted to /var/lib/solace with :Z relabel, owned by the
+    mapped container UID.
+  - HA redundancy via env keys, driven from group_vars (routername,
+    redundancy_enable, redundancy_group_node_<name>_connectvia/_nodetype for
+    all three members, redundancy_authentication_presharedkey_key,
+    redundancy_activestandbyrole [primary/backup only],
+    redundancy_matelink_connectvia [primary/backup only], configsync_enable
+    [primary/backup only], monitor = nodetype monitoring only).
+  - networking: parameterize. Default network_mode: host (rootless bridge NATs
+    inter-broker source IPs and breaks consul gossip). If a published-ports
+    mode is requested, expose it as a variable, do not hard-code ports.
+  - Solace applies redundancy config ONLY on first boot against EMPTY storage —
+    include a guarded, explicit wipe/first-init step, not an unconditional one.
 
-echo "=== B5. THE substrate proof: can a container make memory executable? ==="
-echo "    (this is what caught the SELinux relabel issue on VM1)"
-podman run --rm -u 1000:1000 \
-  artifactory.global.example.com/gv-images-products/oss/solace-pubsub-enterprise:10.25.0.217 \
-  /bin/echo "exec-ok" 2>&1 | tail -3
+STEP 3 — verification tasks: container running, `ulimit -n` inside >= 2448 (read
+via /proc/<pid>/limits, not `podman exec ulimit`), POST passed (no "POST
+Violation [022]"), SEMP returns 200. For HA: `show redundancy` reachable.
 
-echo "=== B6. image present / pullable ==="
-podman images | grep solace-pubsub || echo "image not pulled yet (podman pull needed)"
+CONSTRAINTS: idempotent; match existing var precedence; keep the podman_run
+path as a one-variable rollback; flag every place you had to guess a convention;
+list the manual steps I still own (vault vars, firewall ports
+8300/8301/8302/8741/55555, certs if TLS ports are used).
 
-echo "=== B7. free space on graphroot (need >3-4GB for image) ==="
-df -h /app/solace/podman/graphroot
+After generating, give me a diff-style summary of files added/changed and a
+short argument for whether Quadlet would have been a better target than
+podman-compose for single-container-per-VM, so the trade-off is on record.
+
+
+cat > /etc/systemd/system/user@.service.d/solace-limits.conf <<'EOF'
+[Service]
+LimitNOFILE=1048576
+LimitMEMLOCK=infinity
+LimitCORE=infinity
+EOF
