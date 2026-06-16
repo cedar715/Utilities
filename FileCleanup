@@ -1,4 +1,11 @@
-systemctl --user start solace.service
-sleep 30
-podman logs solace 2>&1 | tail -15
-curl -s -u admin:admin http://localhost:8080/SEMP/v2/monitor/about/api | grep -o 'responseCode.:.200'
+# 1. the broker's own words THIS boot — what's the last thing before it dies?
+podman logs solace 2>&1 | tail -30
+
+# 2. did the file actually get VM1's content + the hostname change?
+grep -iE 'user:|hostname:|/var/lib/solace|storage-group|device:|solace_storage|secrets|extra_hosts' /home/solace/solace/solace-compose.yml
+
+# 3. is storage there + owned 1000?
+podman unshare ls -lan /home/solace/solace/storage-group | head -4
+
+# 4. systemd's view — created→died timing
+systemctl --user status solace.service --no-pager | grep -E 'Active:|Main PID:|status='
