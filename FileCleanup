@@ -1,14 +1,21 @@
-solace@cnlvatfss002[DEV][solace] $ ss -tlnp 2>/dev/null | grep ':2222' || sudo ss -tlnp | grep ':2222'
-LISTEN 0      128          0.0.0.0:2222       0.0.0.0:*    users:(("sshd",pid=2712477,fd=3))                                                 
-solace@cnlvatfss002[DEV][solace] $ podman ps -a
-CONTAINER ID  IMAGE                                                                                                 COMMAND            CREATED        STATUS      PORTS                                                                                                                                                                         NAMES
-eeda14c2eaa8  artifactory.global.standardchartered.com/gv-images-products/oss/solace-pubsub-enterprise:10.25.0.217  /usr/sbin/boot.sh  3 seconds ago  Created     0.0.0.0:1943->1943/tcp, 0.0.0.0:2222->2222/tcp, 0.0.0.0:8008->8008/tcp, 0.0.0.0:8080->8080/tcp, 0.0.0.0:55003->55003/tcp, 0.0.0.0:55443->55443/tcp, 0.0.0.0:55555->55555/tcp  solace
-solace@cnlvatfss002[DEV][solace] $ ps -ef | grep -iE 'conmon|rootlessport|podman' | grep -v grep
-podman      1101       1  0 May11 ?        00:00:57 /usr/lib/systemd/systemd --user
-podman      1112    1101  0 May11 ?        00:00:00 (sd-pam)
-solace   2711739       1  0 Jun16 ?        00:00:01 /usr/bin/conmon --api-version 1 -c 6ba3dfcd84a81062ef18f32cddfb266de2ea13bd359655c16b3aa4048a61d4e2 -u 6ba3dfcd84a81062ef18f32cddfb266de2ea13bd359655c16b3aa4048a61d4e2 -r /usr/bin/crun -b /opt/apps/solace/podman/graphroot/overlay-containers/6ba3dfcd84a81062ef18f32cddfb266de2ea13bd359655c16b3aa4048a61d4e2/userdata -p /opt/apps/solace/podman/runroot/overlay-containers/6ba3dfcd84a81062ef18f32cddfb266de2ea13bd359655c16b3aa4048a61d4e2/userdata/pidfile -n solace_solace_1 --exit-dir /run/user/5011/libpod/tmp/exits --persist-dir /run/user/5011/libpod/tmp/persist/6ba3dfcd84a81062ef18f32cddfb266de2ea13bd359655c16b3aa4048a61d4e2 --full-attach -s -l k8s-file:/app/solace/logs/noformat-logs/solace/solace.log --log-level warning --syslog --log-size-max 10000000 --runtime-arg --log-format=json --runtime-arg --log --runtime-arg=/opt/apps/solace/podman/runroot/overlay-containers/6ba3dfcd84a81062ef18f32cddfb266de2ea13bd359655c16b3aa4048a61d4e2/userdata/oci-log --conmon-pidfile /opt/apps/solace/podman/runroot/overlay-containers/6ba3dfcd84a81062ef18f32cddfb266de2ea13bd359655c16b3aa4048a61d4e2/userdata/conmon.pid --exit-command /usr/bin/podman --exit-command-arg --root --exit-command-arg /opt/apps/solace/podman/graphroot --exit-command-arg --runroot --exit-command-arg /opt/apps/solace/podman/runroot --exit-command-arg --log-level --exit-command-arg warning --exit-command-arg --cgroup-manager --exit-command-arg systemd --exit-command-arg --tmpdir --exit-command-arg /run/user/5011/libpod/tmp --exit-command-arg --network-config-dir --exit-command-arg  --exit-command-arg --network-backend --exit-command-arg netavark --exit-command-arg --volumepath --exit-command-arg /opt/apps/solace/podman/graphroot/volumes --exit-command-arg --db-backend --exit-command-arg sqlite --exit-command-arg --transient-store=false --exit-command-arg --hooks-dir --exit-command-arg /usr/share/containers/oci/hooks.d --exit-command-arg --runtime --exit-command-arg crun --exit-command-arg --storage-driver --exit-command-arg overlay --exit-command-arg --events-backend --exit-command-arg journald --exit-command-arg container --exit-command-arg cleanup --exit-command-arg --stopped-only --exit-command-arg 6ba3dfcd84a81062ef18f32cddfb266de2ea13bd359655c16b3aa4048a61d4e2
-solace   3306697 1333213 15 00:49 ?        00:00:00 /usr/bin/python3 /home/solace/.local/bin/podman-compose -f /home/solace/solace/solace-compose.yml up
-solace   3306817 3306697  0 00:49 ?        00:00:00 podman start -a solace
-solace@cnlvatfss002[DEV][solace] $ 
+# stop the unit so it stops racing
+systemctl --user stop solace.service
 
+# 1. kill the orphaned conmon/container from the other graphroot
+kill 2711739 2>/dev/null            # the stray conmon pid from your ps output
+podman rm -af 2>/dev/null
+# also clean the OTHER graphroot's stray if podman sees it
+podman --root /opt/apps/solace/podman/graphroot --runroot /opt/apps/solace/podman/runroot rm -af 2>/dev/null
 
+# 2. remove the 2222 port mapping from the compose (host sshd owns it)
+sed -i '/- "2222:2222"/d' /home/solace/solace/solace-compose.yml
+grep -n '2222' /home/solace/solace/solace-compose.yml && echo "STILL THERE - remove by hand" || echo "2222 mapping removed"
+
+# 3. confirm 2222 is only sshd now (we're no longer fighting it)
+ss -tlnp 2>/dev/null | grep ':2222'   # should show only sshd
+
+systemctl --user start solace.service
+sleep 30
+podman ps                            # solace should now be Up (not just Created)
+podman logs solace 2>&1 | tail -15
+curl -s -u admin:admin http://localhost:8080/SEMP/v2/monitor/about/api | grep -o 'responseCode.:.200'
