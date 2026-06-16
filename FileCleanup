@@ -1,8 +1,4 @@
-# wipe the half-states from earlier attempts
-podman unshare rm -rf /home/solace/solace/storage-group
-podman unshare rm -rf /opt/apps/solace/storage-group 2>/dev/null
-
-# fresh storage at VM1's path, owned 1000:1000
-mkdir -p /home/solace/solace/storage-group
-podman unshare chown 1000:1000 /home/solace/solace/storage-group
-podman unshare ls -lan /home/solace/solace/storage-group   # total 0, owner 1000 1000
+systemctl --user start solace.service
+sleep 30
+podman logs solace 2>&1 | tail -15
+curl -s -u admin:admin http://localhost:8080/SEMP/v2/monitor/about/api | grep -o 'responseCode.:.200'
