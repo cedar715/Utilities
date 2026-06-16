@@ -5,3 +5,10 @@ sudo ss -tlnp | grep ':2222'
 
 # or check the service directly
 systemctl is-active sshd     # active
+
+
+systemctl --user start solace.service
+sleep 30
+podman ps                            # solace = Up (not Created)
+podman logs solace 2>&1 | tail -15
+curl -s -u admin:admin http://localhost:8080/SEMP/v2/monitor/about/api | grep -o 'responseCode.:.200'
