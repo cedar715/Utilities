@@ -1,15 +1,7 @@
-# stop the crash loop
-systemctl --user stop solace.service
+# on VM2 — what's actually in the storage-group the broker is auditing?
+podman unshare ls -lan /home/solace/solace/storage-group
+podman unshare ls -lan /home/solace/solace/storage-group/var 2>/dev/null
+podman unshare find /home/solace/solace/storage-group -maxdepth 2 -name '*soltr*' 2>/dev/null
 
-# wipe the stale storage (podman unshare so ownership/namespace is right)
-podman unshare rm -rf /home/solace/solace/storage-group
-mkdir -p /home/solace/solace/storage-group
-# re-apply container-UID ownership (the step the playbook's unshare role does)
-podman unshare chown -R 1000:1000 /home/solace/solace/storage-group
-
-# start fresh — broker initializes clean storage for THIS image version
-systemctl --user start solace.service
-
-# watch it get past the audit this time
-sleep 30
-podman logs solace 2>&1 | tail -30
+# on VM1 (the stable one) — same listing, to diff against
+podman unshare ls -lan /home/solace/solace/storage-group
