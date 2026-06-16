@@ -1,2 +1,3 @@
-# does the compose file even parse as valid YAML?
-python3 -c "import yaml; yaml.safe_load(open('/home/solace/solace/solace-compose.yml')); print('YAML OK')"
+cd /home/solace/solace
+/home/solace/.local/bin/podman-compose -f solace-compose.yml up
+# let it print whatever error, then Ctrl-C
