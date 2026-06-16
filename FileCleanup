@@ -1,3 +1,6 @@
+# remove the stray home-dir copy so there's no confusion (keep a backup first)
+mv /home/solace/solace-compose.yml /home/solace/solace-compose.yml.stray-bak
+
 cd /home/solace/solace
 systemctl --user stop solace.service
 
