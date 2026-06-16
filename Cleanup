@@ -1,6 +1,31 @@
-# A. the ansible connect/become mechanism (answers Q1)
-grep -rn 'ansible_user\|remote_user\|become' inventories/ group_vars/ ansible.cfg 2>/dev/null
+SyslogIdentifier=%N
 
-# B. do run and compose paths use the SAME container UID? (decides if storage survives a switch)
-#    podman-run branch: grep the --user value;  compose branch: the user: line
-grep -rn 'PSP_USER_ID\|--user\|id -u\|user:.*1000\|user: ' roles/solace_systemd/ roles/solace_compose/ 2>/dev/null
+{% if broker_runtime | default('systemd') == 'podman_compose' %}
+# ── podman-compose path ───────────────────────────────────────────────────────
+# broker_runtime=podman_compose: start via podman-compose (foreground, Type=simple).
+# The compose file is rendered by solace_systemd when broker_runtime=podman_compose.
+Environment=XDG_RUNTIME_DIR=/run/user/%U
+Type=simple
+WorkingDirectory=/home/{{ solace_local_service_user }}/solace
+ExecStartPre=-{{ solace_compose_bin | default('/home/' + solace_local_service_user + '/.local/bin/podman-compose') }} -f {{ solace_compose_file | default('/home/' + solace_local_service_user + '/solace/solace-compose.yml') }} down --timeout 60
+ExecStart={{ solace_compose_bin | default('/home/' + solace_local_service_user + '/.local/bin/podman-compose') }} -f {{ solace_compose_file | default('/home/' + solace_local_service_user + '/solace/solace-compose.yml') }} up
+ExecStop={{ solace_compose_bin | default('/home/' + solace_local_service_user + '/.local/bin/podman-compose') }} -f {{ solace_compose_file | default('/home/' + solace_local_service_user + '/solace/solace-compose.yml') }} down --timeout 120
+TimeoutStopSec=180
+{% else %}
+# ── podman run path (default) ─────────────────────────────────────────────────
+# default is 90s clashing with podman stop --time 1200
+TimeoutStopSec=1260
+ExecStop=/usr/bin/podman stop {{ solace_container_name }} --time 1200
+ExecStopPost=-/usr/bin/podman rm -f -i --cidfile=%t/%N.cid
+ExecStopPost=-rm -f %t/%N.cid
+Delegate=yes
+Type=notify
+NotifyAccess=all
+ExecStartPre=/bin/bash -c 'echo PSP_USER_ID=$(id -u {{ solace_local_service_user }}) > /home/{{ solace_local_service_user }}/etc_solace/solace-user.conf'
+ExecStart=/usr/bin/podman run --env-file=/home/{{ solace_local_service_user }}/etc_solace/solace.env --user ${PSP_USER_ID} --cidfile=%t/%N.cid \
+  ${PSP_COMMON_ARGS_REPLACE} \
+  ${PSP_COMMON_ARGS_RM} \
+  ${PSP_COMMON_ARGS_LOGDRIVER} \
+  ${PSP_COMMON_ARGS_CGROUPS} \
+  ${PSP_COMMON_ARGS_SDNOTIFY} \
+  ${PSP_COMMON_ARGS_DETACHED} \
