@@ -1,10 +1,37 @@
-appadmintemp@vm2[DEV][~] $ stat -fc %T /sys/fs/cgroup   
-cgroup2fs
-appadmintemp@vm2[DEV][~] $ getent passwd solace | cut -d: -f3,6,7 
-5011:/home/solace:/bin/bash
-appadmintemp@vm2[DEV][~] $ cat /etc/subuid | grep solace
-solace:689824:65536
-solacex:755360:65536
-appadmintemp@vm2[DEV][~] $ ls -laZd /app/solace/podman/graphroot 2>/dev/null || echo "graphroot not at /app — check storage.conf"
-drwxr-xr-x. 10 solace solace unconfined_u:object_r:container_var_lib_t:s0 4096 Jun 15 14:39 /app/solace/podman/graphroot
-appadmintemp@vm2[DEV][~] $ 
+Resolved values:
+solace_container_name: solace
+HA groups (same): ha_primary_node, ha_backup_node, ha_monitor_node
+HA roles (same): primary, backup, monitor
+routername_prefix: cncdcdev1
+Router names:
+primary: cncdcdev1primary
+backup: cncdcdev1backup
+monitor: cncdcdev1monitor
+Node FQDNs:
+node1_fqdn: cdc-dev1-a.appid.cn.app.example.com
+node2_fqdn: cdc-dev1-b.appid.cn.app.example.com
+node3_fqdn: cdc-dev1-c.appid.cn.app.example.com
+Replication endpoints:
+primary connect via: cdc-dev1-a.appid.cn.app.example.com:55443
+backup connect via: cdc-dev1-b.appid.cn.app.example.com:55443
+Virtual router names:
+primary: v:cncdcdev1primary
+backup: v:cncdcdev1backup
+monitor: v:cncdcdev1monitor
+
+---
+inventories/nonp/cn/cdc-dev1/hosts
+inventories/nonp/cn/cdc-dev1/group_vars/all.yml
+inventories/nonp/cn/cdc-dev1/group_vars/ha_servers.yml
+inventories/nonp/cn/cdc-dev1/group_vars/ha_primary_node.yml
+inventories/nonp/cn/cdc-dev1/group_vars/ha_backup_node.yml
+inventories/nonp/cn/cdc-dev1/group_vars/ha_monitor_node.yml
+Shared HA values for all 3 nodes
+
+solace_container_name: solace
+routername_prefix: cncdcdev1
+node1_fqdn: cdc-dev1-a.appid.cn.app.example.com
+node2_fqdn: cdc-dev1-b.appid.cn.app.example.com
+node3_fqdn: cdc-dev1-c.appid.cn.app.example.com
+global_fqdn: cdc-dev1.appid.app.example.com
+site_fqdn: cdc-dev1.appid.cn.app.example.com
