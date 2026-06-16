@@ -1,16 +1,7 @@
-# remove the stray home-dir copy so there's no confusion (keep a backup first)
-mv /home/solace/solace-compose.yml /home/solace/solace-compose.yml.stray-bak
+# 1. VM1 — confirm its exact user + volume line (our source of truth)
+#    (run on VM1)
+grep -iE 'user:|/var/lib/solace|storage-group' /home/solace/solace/solace-compose.yml
 
-cd /home/solace/solace
-systemctl --user stop solace.service
-
-# back up the bad live file
-cp solace-compose.yml solace-compose.yml.ghcp-bad
-
-# promote the GOOD design (home-dir) into the live location the unit loads
-cp /home/solace/solace-compose.yml /home/solace/solace/solace-compose.yml
-
-# verify the live file now has the good values
-grep -iE 'user:|cap_drop|read_only|cgroupns|storage-group|device:' /home/solace/solace/solace-compose.yml
-#   want: user "0:0", NO cap_drop, NO read_only, cgroupns private,
-#         direct bind /opt/apps/solace/storage-group, NO device: line
+# 2. VM1 — what host UID actually owns its working storage-group?
+#    (run on VM1)
+podman unshare ls -lan /home/solace/solace/storage-group | head -3
