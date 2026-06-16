@@ -1,7 +1,12 @@
-# 1. VM1 — confirm its exact user + volume line (our source of truth)
-#    (run on VM1)
-grep -iE 'user:|/var/lib/solace|storage-group' /home/solace/solace/solace-compose.yml
-
-# 2. VM1 — what host UID actually owns its working storage-group?
-#    (run on VM1)
-podman unshare ls -lan /home/solace/solace/storage-group | head -3
+appadmintemp@cnlvatfss001[DEV][~] $ sudo su -
+Last login: Tue Jun 16 23:25:49 CST 2026 on pts/0
+root@cnlvatfss001[DEV][~] # su - solace
+Last login: Tue Jun 16 23:26:44 CST 2026 on pts/0
+solace@cnlvatfss001[DEV][~] $ grep -iE 'user:|/var/lib/solace|storage-group' /home/solace/solace/solace-compose.yml
+    user: "1000:1000"  
+      - ./storage-group:/var/lib/solace:Z   # :Z keeps SELinux enforcing
+solace@cnlvatfss001[DEV][~] $ podman unshare ls -lan /home/solace/solace/storage-group | head -3
+total 12
+drwxr-x---.   9 1000 1000  133 Jun 16 05:44 .
+drwxr-x---.   3    0    0   53 Jun 16 05:42 ..
+solace@cnlvatfss001[DEV][~] $ 
