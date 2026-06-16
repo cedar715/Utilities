@@ -1,3 +1,4 @@
-cd /home/solace/solace
-/home/solace/.local/bin/podman-compose -f solace-compose.yml up
-# let it print whatever error, then Ctrl-C
+solace@cnlvatfss002[DEV][solace] $ /home/solace/.local/bin/podman-compose -f solace-compose.yml up
+c74626cef70f058d792497af012c27a4d9a6e06a950d61d8a3110430fdd0e4cb
+[solace] | Error: unable to start container fbea7afc7e3e1fe7462fe9a7e8c0964c471cfdc285f61bf4bf908a7999c2ddc2: rootlessport listen tcp 0.0.0.0:2222: bind: address already in use
+solace@cnlvatfss002[DEV][solace] $ 
