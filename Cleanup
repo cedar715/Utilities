@@ -1,1 +1,19 @@
-grep -rn 'become_user\|become_method\|systemctl --user\|XDG_RUNTIME_DIR' roles/ playbooks/
+# 1. ansible can reach VM2 and become root there
+ansible -i inventories/nonp/cn/cdc-dev1/hosts cdc-dev1-b.appid.cn.app.example.com -m ping
+ansible -i inventories/nonp/cn/cdc-dev1/hosts cdc-dev1-b.appid.cn.app.example.com -b -m command -a 'id'   # shows uid=0 if become works
+
+# 2. THE Centrify check — does become to solace work? (this is the one that bit you manually)
+ansible -i inventories/nonp/cn/cdc-dev1/hosts cdc-dev1-b.appid.cn.app.example.com \
+  -b --become-user solace -m command -a 'whoami'
+#   prints "solace" = good. "not allowed to execute ... as solace" = sudo path blocked,
+#   you need become_method: su (we discussed) — FIX before running the play.
+
+# 3. the wipe/reinit flag name GHCP actually generated (so you wipe stale VM2 data)
+grep -rn 'force_reinit\|reinit\|wipe\|storage.*state\|first.*boot' roles/ playbooks/ group_vars/
+
+# 4. vault values exist (PSK + admin password) or the play will fail templating
+grep -rn 'vault_' inventories/ group_vars/
+
+# 5. confirm the two make-or-break tasks are even in the generated code
+grep -rn 'user@.service\|LimitNOFILE\|solace-limits' roles/ playbooks/   # the limits drop-in
+grep -rn 'fcontext\|restorecon\|container_var_lib' roles/ playbooks/      # the SELinux relabel
