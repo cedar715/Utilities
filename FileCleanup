@@ -1,9 +1,12 @@
-# is it still running (not looping)?
-systemctl --user is-active solace.service        # active
-podman ps                                         # solace Up, not restarting
+# 1. the LAST death's reason + timing (is systemd killing it, or is it self-exiting?)
+systemctl --user status solace.service --no-pager | tail -15
 
-# the actual proof — SEMP answers
-curl -s -u admin:admin http://localhost:8080/SEMP/v2/monitor/about/api | grep -o 'responseCode.:.200'
+# 2. the broker's final words THIS boot — is vmr-solaudit still there, or something new?
+podman logs solace 2>&1 | tail -40
 
-# and let it sit — if it's still up in 5 min, the loop is truly broken
-sleep 60 && systemctl --user status solace.service | grep -E 'Active:|since'
+# 3. is the storage now present + correctly owned? (did the fix actually hold?)
+podman unshare ls -lan /home/solace/solace/storage-group 2>/dev/null || echo "STILL MISSING at ~/solace"
+ls -la /opt/apps/solace/storage-group 2>/dev/null || echo "not at /opt/apps either"
+
+# 4. what does the compose ACTUALLY say right now (did your edit save?)
+grep -iE 'user:|volumes:|/var/lib/solace|device:|storage' /home/solace/solace/solace-compose.yml
