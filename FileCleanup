@@ -1,11 +1,7 @@
-solace@cnlvatfss002[DEV][solace] $ systemctl --user stop solace.service
-solace@cnlvatfss002[DEV][solace] $ kill 2711739 2>/dev/null   
-solace@cnlvatfss002[DEV][solace] $ podman rm -af 2>/dev/null
-solace@cnlvatfss002[DEV][solace] $ podman --root /opt/apps/solace/podman/graphroot --runroot /opt/apps/solace/podman/runroot rm -af 2>/dev/null
-6ba3dfcd84a81062ef18f32cddfb266de2ea13bd359655c16b3aa4048a61d4e2
-solace@cnlvatfss002[DEV][solace] $ sed -i '/- "2222:2222"/d' /home/solace/solace/solace-compose.yml
-solace@cnlvatfss002[DEV][solace] $ grep -n '2222' /home/solace/solace/solace-compose.yml && echo "STILL THERE - remove by hand" || echo "2222 mapping removed"
-2222 mapping removed
-solace@cnlvatfss002[DEV][solace] $ ss -tlnp 2>/dev/null | grep ':2222'   # should show only sshd
-solace@cnlvatfss002[DEV][solace] $ ss -tlnp 2>/dev/null | grep ':2222'   # should show only sshd
-solace@cnlvatfss002[DEV][solace] $ 
+ss -tlnp 2>/dev/null | grep ':2222' || sudo ss -tlnp | grep ':2222'
+
+# with sudo, you'll see it again
+sudo ss -tlnp | grep ':2222'
+
+# or check the service directly
+systemctl is-active sshd     # active
