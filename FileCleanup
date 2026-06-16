@@ -1,21 +1,11 @@
-# stop the unit so it stops racing
-systemctl --user stop solace.service
-
-# 1. kill the orphaned conmon/container from the other graphroot
-kill 2711739 2>/dev/null            # the stray conmon pid from your ps output
-podman rm -af 2>/dev/null
-# also clean the OTHER graphroot's stray if podman sees it
-podman --root /opt/apps/solace/podman/graphroot --runroot /opt/apps/solace/podman/runroot rm -af 2>/dev/null
-
-# 2. remove the 2222 port mapping from the compose (host sshd owns it)
-sed -i '/- "2222:2222"/d' /home/solace/solace/solace-compose.yml
-grep -n '2222' /home/solace/solace/solace-compose.yml && echo "STILL THERE - remove by hand" || echo "2222 mapping removed"
-
-# 3. confirm 2222 is only sshd now (we're no longer fighting it)
-ss -tlnp 2>/dev/null | grep ':2222'   # should show only sshd
-
-systemctl --user start solace.service
-sleep 30
-podman ps                            # solace should now be Up (not just Created)
-podman logs solace 2>&1 | tail -15
-curl -s -u admin:admin http://localhost:8080/SEMP/v2/monitor/about/api | grep -o 'responseCode.:.200'
+solace@cnlvatfss002[DEV][solace] $ systemctl --user stop solace.service
+solace@cnlvatfss002[DEV][solace] $ kill 2711739 2>/dev/null   
+solace@cnlvatfss002[DEV][solace] $ podman rm -af 2>/dev/null
+solace@cnlvatfss002[DEV][solace] $ podman --root /opt/apps/solace/podman/graphroot --runroot /opt/apps/solace/podman/runroot rm -af 2>/dev/null
+6ba3dfcd84a81062ef18f32cddfb266de2ea13bd359655c16b3aa4048a61d4e2
+solace@cnlvatfss002[DEV][solace] $ sed -i '/- "2222:2222"/d' /home/solace/solace/solace-compose.yml
+solace@cnlvatfss002[DEV][solace] $ grep -n '2222' /home/solace/solace/solace-compose.yml && echo "STILL THERE - remove by hand" || echo "2222 mapping removed"
+2222 mapping removed
+solace@cnlvatfss002[DEV][solace] $ ss -tlnp 2>/dev/null | grep ':2222'   # should show only sshd
+solace@cnlvatfss002[DEV][solace] $ ss -tlnp 2>/dev/null | grep ':2222'   # should show only sshd
+solace@cnlvatfss002[DEV][solace] $ 
