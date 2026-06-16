@@ -1,4 +1,2 @@
- ansible -i inventories/nonp/cn/cdc-dev1/hosts machine2 \
-  -b --become-user solace --become-method su -m command -a 'whoami'
-machine2 | FAILED | rc=-1 >>
-Timeout (12s) waiting for privilege escalation prompt: 
+# how do the EXISTING (non-compose) roles become/run as solace?
+grep -rn 'become_user\|become_method\|runuser\|su - solace\|ansible_become\|remote_user\|systemctl --user' roles/ group_vars/ | grep -iv compose
