@@ -1,8 +1,1 @@
-{"data":{"platform":"VMR","sempVersion":"2.48"},"collections":{},"links":{"uri":"http://localhost:8080/SEMP/v2/monitor/about/api"},"meta":{"request":{"method":"GET","uri":"http://localhost:8080/SEMP/v2/monitor/ab
-out/api"},"responseCode":200}}solacpodman logs solace 2>&1 | grep -iE 'platform type|pre-startup'iE 'platform type|pre-startup'
-2026-06-16T16:55:46.832+00:00 <local0.warning> solace2 appuser[1]: /usr/sw                        main.cpp:764                          (SOLDAEMON    - 0x00000000) main(0)@solacedaemon                          WARN     Determining platform type: [  OK  ]
-2026-06-16T16:55:47.010+00:00 <local0.warning> solace2 appuser[1]: /usr/sw                        main.cpp:764                          (SOLDAEMON    - 0x00000000) main(0)@solacedaemon                          WARN     Running pre-startup checks: [  OK  ]
-solace@cnlvatfss002[DEV][solace] $ sleep 120 && systemctl --user is-active solace.service && podman ps --format '{{.Names}} {{.Status}}'
-active
-solace Up 5 minutes
-solace@cnlvatfss002[DEV][solace] $ 
+cp /home/solace/solace/solace-compose.yml ~/solace-compose.WORKING.vm2.yml
