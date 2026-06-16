@@ -1,2 +1,6 @@
 grep -rn 'become_method\|ansible_become_method\|become_user\|runuser\|ansible_user' \
   group_vars/ inventories/ ansible.cfg roles/*/tasks/ | grep -iv '#'
+roles/admin_propagate_admin_sshkeys_to_solace_user/tasks/main.yml:21:- name: Add ado public key if not present - run as root become true and fix ownership, same effect as become_user without the su/sudo limitation
+roles/admin_setup_podman/tasks/main.yaml:45:  become_user: "{{ solace_local_service_user }}"
+roles/admin_setup_podman/tasks/main.yaml:59:  become_user: "{{ solace_local_service_user }}"
+roles/solace_backup_ondemand_aws/tasks/main.yml:32:  become_user: "{{ solace_local_service_user }}"
