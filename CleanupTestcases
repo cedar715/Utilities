@@ -1,1 +1,4 @@
-grep -rn 'become_user\|become:\|become_method\|ansible_user\|hosts:' site-*.yml playbooks/ 2>/dev/null
+# as appadmintemp
+   sudo cat /home/solace/.ssh/authorized_keys | grep -c .   # >0 = key(s) present
+
+ansible -i inventories/nonp/cn/cdc-dev1 ha_backup_node -u solace -m ping
