@@ -1,13 +1,1 @@
-solace@cnlvatfss002[DEV][~] $ ls -lrt
-total 1612
--rw-------. 1 solace solace 1615469 Jun  5 15:15 get-pip.py
--rw-r-----. 1 root   root      8373 Jun 11 20:03 solace-compose.yml.bak
--rw-r-----. 1 solace solace   12484 Jun 16 02:35 solace-compose.yml
-drwxr-xr-x. 2 solace solace      67 Jun 16 21:10 etc_solace
-drwxrwxr-x. 2 690824 solace     134 Jun 16 23:01 secrets
-drwxr-x---. 2 solace solace      21 Jun 16 23:08 tmp-ssl
-drwxrwxr-x. 2 690824 solace      82 Jun 16 23:09 mnt_solace
--rw-rw-rw-. 1 solace solace    1130 Jun 16 23:09 storage-check-is-semp-activated.log
-drwxr-xr-x. 3 solace solace      53 Jun 17 00:20 solace
-solace@cnlvatfss002[DEV][~] $ ls solace
-solace-compose.yml  storage-group
+grep -i 'ExecStart\|WorkingDirectory\|-f ' ~/.config/systemd/user/solace.service
