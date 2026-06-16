@@ -1,15 +1,13 @@
-# 1. Is there a SYSTEM (root) unit for solace, or not?
-sudo systemctl list-unit-files | grep -i solace
-ls -l /etc/systemd/system/*solace* 2>/dev/null || echo "no system unit"
+# is the existing broker a USER unit? (it will be)
+systemctl --user list-unit-files | grep -i solace
+ls -l ~/.config/systemd/user/*solace* 2>/dev/null
 
-# 2. Is there a USER (rootless) unit instead?
-sudo ls -l /home/solace/.config/systemd/user/ 2>/dev/null || echo "no user units dir"
-sudo loginctl show-user solace -p Linger 2>/dev/null || echo "no linger / no user manager"
+# is linger on for solace?
+loginctl show-user "$(id -un)" -p Linger
 
-# 3. THE deciding question — what user does the running broker process belong to?
-sudo podman ps 2>/dev/null | grep -i solace          # rootful podman lives under root
-ps -ef | grep -i '[s]olacedaemon\|[b]oot.sh'         # look at the UID column (root vs solace)
+# what's running, under whom (you, solace)
+systemctl --user list-units --type=service | grep -i solace
+podman ps
 
-# 4. Who owns the container storage in use?
-sudo podman info --format '{{.Store.GraphRoot}} (rootful)' 2>/dev/null
-sudo -u solace podman info --format '{{.Store.GraphRoot}} (rootless)' 2>/dev/null || echo "rootless check needs the su/runuser path"
+# your rootless storage
+podman info --format '{{.Store.GraphRoot}}'
