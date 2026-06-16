@@ -1,23 +1,27 @@
-echo "=== A1. cgroup v2 (must be cgroup2fs) ==="
-stat -fc %T /sys/fs/cgroup
+# however you get into solace on VM2 — direct login, or root->su per the existing model
+export XDG_RUNTIME_DIR=/run/user/5011
+export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/5011/bus
 
-echo "=== A2. user manager limits ceiling (must be 1048576 / infinity) ==="
-systemctl show user@5011.service -p LimitNOFILE -p LimitMEMLOCK
-ls -l /etc/systemd/system/user@.service.d/ 2>/dev/null && \
-  cat /etc/systemd/system/user@.service.d/*.conf 2>/dev/null || \
-  echo ">>> NO drop-in found — POST will fail nofile. Must create before deploy."
+echo "=== B1. user systemd manager reachable (must say running/degraded) ==="
+systemctl --user is-system-running
 
-echo "=== A3. linger for solace (must be Linger=yes) ==="
-loginctl show-user solace -p Linger
+echo "=== B2. podman works rootless + storage driver/root ==="
+podman info --format 'driver={{.Store.GraphDriverName}} graphroot={{.Store.GraphRoot}} runroot={{.Store.RunRoot}}'
 
-echo "=== A4. subuid/subgid range for solace (need a >=65536 range) ==="
-grep solace /etc/subuid /etc/subgid
+echo "=== B3. podman-compose present + path (unit references this path) ==="
+which podman-compose || ls -l ~/.local/bin/podman-compose
 
-echo "=== A5. SELinux label on graphroot (must be container_var_lib_t) ==="
-ls -laZd /app/solace/podman/graphroot 2>/dev/null || echo ">>> graphroot missing — check storage.conf path"
+echo "=== B4. subuid mapping actually works (no setresuid error) ==="
+podman unshare cat /proc/self/uid_map
 
-echo "=== A6. graphroot mount is NOT noexec (must NOT list noexec) ==="
-findmnt -T /app/solace/podman/graphroot -o TARGET,FSTYPE,OPTIONS
+echo "=== B5. THE substrate proof: can a container make memory executable? ==="
+echo "    (this is what caught the SELinux relabel issue on VM1)"
+podman run --rm -u 1000:1000 \
+  artifactory.global.example.com/gv-images-products/oss/solace-pubsub-enterprise:10.25.0.217 \
+  /bin/echo "exec-ok" 2>&1 | tail -3
 
-echo "=== A7. firewalld: HA ports open between the 3 VMs (for HA stage; ok if not yet) ==="
-firewall-cmd --list-ports 2>/dev/null | tr ' ' '\n' | grep -E '8300|8301|8302|8741|55555' || echo "HA ports not open yet (only needed at HA stage)"
+echo "=== B6. image present / pullable ==="
+podman images | grep solace-pubsub || echo "image not pulled yet (podman pull needed)"
+
+echo "=== B7. free space on graphroot (need >3-4GB for image) ==="
+df -h /app/solace/podman/graphroot
