@@ -1,1 +1,13 @@
-ssh -L 8080:localhost:8080 appadmintemp@<vm1-ip>
+ports:
+  - "443:443"            # SEMP / mgmt TLS
+  - "5553:5553"          # HTTPS healthcheck
+  - "5671:5671"          # AMQPS
+  - "9145:9145"          # AMQPS direct
+  - "55443:55443"        # SMF TLS
+  - "8741:8741"          # HA mate-link
+  - "8300:8300"          # HA sync/configsync TCP
+  - "8301:8301"
+  - "8302:8302"
+  - "8300:8300/udp"      # HA sync UDP
+  - "8301:8301/udp"
+  - "8302:8302/udp"
