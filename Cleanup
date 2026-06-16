@@ -1,8 +1,6 @@
-# what the prod user-manager ceiling actually is (your provisioning play must reproduce this)
-cat /proc/$(podman inspect -f '{{.State.Pid}}' solace)/limits | grep -iE 'open files|locked memory'
+# A. the ansible connect/become mechanism (answers Q1)
+grep -rn 'ansible_user\|remote_user\|become' inventories/ group_vars/ ansible.cfg 2>/dev/null
 
-# the prod compose/run setup for reference — how solace.service actually launches it
-cat ~/.config/systemd/user/solace.service | grep -iE 'ExecStart|Type|XDG|podman'
-
-# subuid range prod uses
-cat /etc/subuid | grep solace 2>/dev/null || echo "can't read (need root) — check on new VM instead"
+# B. do run and compose paths use the SAME container UID? (decides if storage survives a switch)
+#    podman-run branch: grep the --user value;  compose branch: the user: line
+grep -rn 'PSP_USER_ID\|--user\|id -u\|user:.*1000\|user: ' roles/solace_systemd/ roles/solace_compose/ 2>/dev/null
