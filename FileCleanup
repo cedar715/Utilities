@@ -1,1 +1,2 @@
-cp /home/solace/solace/solace-compose.yml ~/solace-compose.WORKING.vm2.yml
+grep -rn '1001:0\|opt/apps\|2222\|cap_drop\|read_only\|solace_storage\|no-new-privileges\|device:' \
+     roles/solace_compose/ group_vars/ inventories/
