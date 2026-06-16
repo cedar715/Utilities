@@ -1,4 +1,10 @@
-stat -fc %T /sys/fs/cgroup                                    # want: cgroup2fs
-getent passwd solace | cut -d: -f3,6,7                        # uid, home, shell — expect 5011, /home/solace, /bin/bash
-cat /etc/subuid | grep solace                                 # note the range start (VM1 was 755360:65536)
-ls -laZd /app/solace/podman/graphroot 2>/dev/null || echo "graphroot not at /app — check storage.conf"
+appadmintemp@vm2[DEV][~] $ stat -fc %T /sys/fs/cgroup   
+cgroup2fs
+appadmintemp@vm2[DEV][~] $ getent passwd solace | cut -d: -f3,6,7 
+5011:/home/solace:/bin/bash
+appadmintemp@vm2[DEV][~] $ cat /etc/subuid | grep solace
+solace:689824:65536
+solacex:755360:65536
+appadmintemp@vm2[DEV][~] $ ls -laZd /app/solace/podman/graphroot 2>/dev/null || echo "graphroot not at /app — check storage.conf"
+drwxr-xr-x. 10 solace solace unconfined_u:object_r:container_var_lib_t:s0 4096 Jun 15 14:39 /app/solace/podman/graphroot
+appadmintemp@vm2[DEV][~] $ 
