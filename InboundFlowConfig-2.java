@@ -1,3 +1,9 @@
-# as appadmintemp
-sudo systemctl status solace-compose.service 2>&1 | head -3
-ls -l /etc/systemd/system/*solace* 2>/dev/null || echo "no system solace units — good"
+# 1. is firewalld even running/enforcing on this host?
+sudo systemctl is-active firewalld
+#   active   = firewalld enforces, rules matter
+#   inactive = firewall is off; ports are open by default, nothing to add
+
+# 2. if active — what's already allowed?
+sudo firewall-cmd --list-all
+sudo firewall-cmd --list-rich-rules
+sudo firewall-cmd --list-ports
