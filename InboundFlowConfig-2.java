@@ -1,2 +1,3 @@
-appadmintemp@cnlvatfss003[DEV][~] $ sudo ls -laZd /opt/apps/solace/podman/graphroot
-drwxr-x---. 10 solace solace unconfined_u:object_r:container_var_lib_t:s0 4096 Jun 17 11:45 /opt/apps/solace/podman/graphroot
+grep -rn 'LimitNOFILE\|nofile\|delegate.conf\|1048576\|524288' \
+  roles/admin_solace_config_system_enablement_post_user_creation/ \
+  roles/admin_solace_config_system_enablement/ 2>/dev/null | grep -iv '#'
