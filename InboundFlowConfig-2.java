@@ -1,1 +1,1 @@
-podman unshare ls -lan /opt/apps/solace/storage-group
+ss -tlnp 2>/dev/null | grep -E '8080|1943|943'
