@@ -1,3 +1,1 @@
-# on a podman-run prod box
-ls -lan /home/solace/solace/storage-group 2>/dev/null | head -3
-# or wherever prod mounts /var/lib/solace from — check the compose/run mount source
+host_storage_group is {{ apps_root }}/solace/storage-group across all inventories, where apps_root is the inventory-specific mount point for the data disk — typically /opt/apps (on-prem srack) or a variable resolved path
