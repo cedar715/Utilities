@@ -1,2 +1,1 @@
-grep 'BEGIN' /home/solace/secrets/server.cert        # cert only, or cert+key?
-grep -i 'tls\|cert' /home/solace/solace/solace-compose.yml   # was the env ever set?
+ssh -L 8080:localhost:8080 appadmintemp@10.27.245.146
