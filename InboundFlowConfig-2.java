@@ -1,2 +1,4 @@
-solace@cnlvatfss003[DEV][~] $ ls -ld /home/solace/secrets    # should now be solace:solace
-drwxr-x---. 2 760370 solace 89 Jun 16 02:34 /home/solace/secrets
+podman unshare ls -lan /home/solace/secrets
+
+  podman unshare cat /home/solace/secrets/username_admin_password
+podman unshare cat /home/solace/secrets/solace-preshared-key.conf 2>/dev/null || echo "no PSK file yet"
