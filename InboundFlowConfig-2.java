@@ -1,3 +1,3 @@
-solace@cnlvatfss003[DEV][~] $ podman system reset --force
- A "/home/solace/.config/containers/storage.conf" config file exists.
-Remove this file if you did not modify the configuration.
+podman ps -a                    # should be empty
+podman images                   # likely empty (reset removes images too — re-pull later)
+podman volume ls                # empty
