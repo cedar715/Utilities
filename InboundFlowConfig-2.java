@@ -1,7 +1,4 @@
-# on VM2 (target) — open a temp listener on an HA port
-nc -l 8741 &
-# on VM1 (source) — try to reach it
-nc -zv 10.27.245.147 8741
-#   "succeeded" / "open" = path is clear
-#   "timed out" / "refused from filtering" = blocked, need a rule
-# kill the listener on VM2 afterward: kill %1
+openssl rand -base64 33
+getent hosts cdc-dev1-a.51080.cn.app.example.com   # want 10.27.245.146 (VM1)
+getent hosts cdc-dev1-b.51080.cn.app.example.com   # want .147 (VM2)
+getent hosts cdc-dev1-c.51080.cn.app.example.com   # want .148 (VM3)
