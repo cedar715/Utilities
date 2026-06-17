@@ -1,4 +1,2 @@
-sudo semanage fcontext -a -e /var/lib/containers /opt/apps/solace/podman/graphroot
-sudo restorecon -R -v /opt/apps/solace/podman/graphroot
-# verify — should now be container_var_lib_t, not unlabeled_t
-sudo ls -laZd /opt/apps/solace/podman/graphroot
+appadmintemp@cnlvatfss003[DEV][~] $ sudo ls -laZd /opt/apps/solace/podman/graphroot
+drwxr-x---. 10 solace solace unconfined_u:object_r:container_var_lib_t:s0 4096 Jun 17 11:45 /opt/apps/solace/podman/graphroot
