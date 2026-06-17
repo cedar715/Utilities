@@ -1,2 +1,6 @@
-olace1> solace@cnlvatfss001[Dpodman exec solace sh -c 'ps aux | grep -i consul | grep -v grep'   # should show a consul processl process
-root         645  1.0  0.3 1350952 106044 ?      Sl   05:56   0:06 /usr/bin/consul agent -config-file /var/lib/solace/config/consul.json
+# on VM3 (monitor)
+systemctl --user start solace.service
+systemctl --user status solace.service --no-pager | grep Active:
+podman ps --format '{{.Names}} {{.Status}}'
+podman logs solace 2>&1 | tail -20
+  
