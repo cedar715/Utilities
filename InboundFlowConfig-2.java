@@ -6,3 +6,5 @@ cat /home/solace/.config/containers/storage.conf | grep -iE 'graphroot|runroot|d
 podman unshare ls -lan /opt/apps/solace/storage-group 2>/dev/null && echo "^ at /opt/apps"
 podman unshare ls -lan /home/solace/solace/storage-group 2>/dev/null && echo "^ at ~/solace"
 podman unshare ls -lan /app/solace/storage-group 2>/dev/null && echo "^ at /app"
+
+  podman unshare rm -rf <the-path-that-has-broker-data>
