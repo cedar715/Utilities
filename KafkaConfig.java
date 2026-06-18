@@ -1,3 +1,2 @@
-# on the VM, make the solace backup readable by appadmintemp
-sudo cp /home/solace/solace-backup-*.tar.gz /tmp/
-sudo chown appadmintemp:appadmintemp /tmp/solace-backup-*.tar.gz
+scp appadmintemp@10.27.245.146:/tmp/solace-backup-*.tar.gz .
+scp appadmintemp@10.27.245.146:/tmp/solace-host-backup-*.tar.gz .
