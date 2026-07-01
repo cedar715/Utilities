@@ -1,4 +1,6 @@
-All prerequisites are confirmed inside the running containers:
-✅ redundancy_authentication_presharedkey_keyfilepath=/run/secrets/solace-preshared-key.conf in env
-✅ /run/secrets/solace-preshared-key.conf present, 73 bytes, Jun 21 12:48 (written before container started at 12:50)
-✅ Both solace-preshared-key.conf and solace-preshared-key-replication.conf mounted correctly
+    healthcheck:
+      test: >-
+        code=$(/usr/bin/curl -sk -o /dev/null -w "%{http_code}"
+        https://127.0.0.1:5553/health-check/guaranteed-active
+        2>/dev/null);
+        [ "$$code" = "200" ] || [ "$$code" = "503" ]
