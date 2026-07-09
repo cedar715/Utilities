@@ -1,7 +1,6 @@
 # pip SSL Bootstrap Fix — RHEL9 CN Machines
 
 **Date:** 2026-07-09  
-**Ticket:** #14618559  
 **Affected roles:** `admin_setup_podman`, `solace_ansible_pip_addon`
 
 ---
