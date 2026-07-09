@@ -1,55 +1,121 @@
-@workspace You are reviewing a PR that adds a parallel podman-compose runtime
-alongside our existing, proven podman-run + systemd flow for deploying Solace
-PubSub+ Enterprise HA. Same Ansible playbooks the team already uses; compose is
-integrated in, selectable via broker_runtime: podman_run | podman_compose.
-podman-run stays the untouched default.
+# pip SSL Bootstrap Fix — RHEL9 CN Machines
 
-FIRST, inspect the repo and report what you found before reviewing:
-- the existing podman-run path: roles/solace_systemd/templates/solace.service.j2,
-  solace.conf.j2, solace.env.j2, and how --user / mounts / env are built
-- var sources (group_vars, inventories, mounts.* / apps_root)
-- the compose additions in this PR (template, tasks, unit branching, gating var)
-Match ALL existing conventions; do not invent a new style.
+**Date:** 2026-07-09  
+**Ticket:** #14618559  
+**Affected roles:** `admin_setup_podman`, `solace_ansible_pip_addon`
 
-THEN review against these, output per finding as:
-[SEVERITY] file:line — issue — regression risk to podman-run — fix
+---
 
-1. NON-REGRESSION (highest priority): with broker_runtime unset/podman_run, prove
-   every run-path task/template/handler is unchanged. Any behavior change to the
-   default path = BLOCKER. Verify compose tasks are gated and the gate defaults to
-   run. Confirm the two runtimes can't run simultaneously (no port/cgroup/storage
-   collision; starting one displaces the other).
+## Problem
 
-2. SEAMLESS SWITCH: trace run→compose→run on one node. Each direction must end
-   clean with no manual step / no residual artifact (stale unit, leftover
-   container, orphaned storage, wrong ownership). Both runtimes must resolve to the
-   SAME container identity: user "0:0"=id -u solace, same storage-group path+owner,
-   :Z relabel, same mounts (storage/secrets/mnt_solace), same solace.env. Unit must
-   branch (compose=Type=simple foreground up) and switch must daemon-reload +
-   enable/disable correctly.
+On RHEL9 CN machines, `get-pip.py` attempts to download pip from the internal
+Artifactory PyPI mirror but fails with:
 
-3. CONVENTIONS: naming, tags, become/identity, var precedence, idempotency, handlers
-   match existing. Vars from existing inventory (mounts.*, apps_root), no hardcoded
-   duplicates. Compose template idempotent (re-run must not thrash/restart).
+```
+Could not fetch URL https://artifactory.../pypi/simple/pip/:
+There was a problem confirming the ssl certificate:
+[SSL] error in system default config (_ssl.c:3179) - skipping
+```
 
-4. ROOTLESS/SOLACE TRAPS — verify each handled:
-   - :Z not :z; no named-volume device: wrapper
-   - NO cap_drop:ALL / read_only / no-new-privileges (kill consul)
-   - no memlock in ulimits; nofile hard=1048576
-   - no published ports under network_mode: host; no 2222 collision
-   - hostname/routername correct per HA role (wrong hostname breaks monitor join)
-   - substrate (cgroup v2, linger, delegate.conf nofile/Delegate, SELinux graphroot
-     label, subuid) asserted BEFORE compose starts; SELinux relabel re-applied after
-     any podman system reset
+### Root Cause
 
-5. HA & SECRETS: redundancy env correct per role, monitor omits activestandbyrole/
-   matelink/configsync; PSK/cert per-node (not Config-Synced); switch must not wipe
-   storage unless guarded.
+Two compounding failures:
 
-6. ROLLBACK: compose failure must revert to run via existing playbook cleanly and
-   documented; failures must surface clearly (no silent loop from Type/notify or
-   missing storage → vmr-solaudit).
+1. **`requests >= 2.30` pre-creates an `SSLContext` at import time.**  
+   On RHEL9 hosts with a misconfigured FIPS/crypto-policy, the `SSLContext`
+   constructor itself crashes:
+   ```
+   ssl.SSLError: [SSL] error in system default config (_ssl.c:3179)
+   ```
+   This kills every pip network call before a single byte is sent — the error
+   occurs in Python's SSL layer, not in pip's download logic.
 
-END with a go/no-go: "Can a node switch run→compose→run with zero manual
-intervention and zero podman-run regression?" If no, list the exact blockers.
-Flag anywhere you had to guess a convention because the diff was ambiguous.
+2. **`python3-pip` package install uses `ignore_errors: true`.**  
+   If the package is unavailable in restricted repos it is silently absent,
+   causing subsequent pip calls to fail with `No module named pip`.
+
+---
+
+## Fix — Three Layers
+
+### Layer 1 — `OPENSSL_CONF=/dev/null`
+
+```bash
+export OPENSSL_CONF=/dev/null
+python3 get-pip.py --user ...
+```
+
+Setting `OPENSSL_CONF` to `/dev/null` prevents Python's SSL module from loading
+the broken system OpenSSL configuration file.  The environment variable is
+scoped to the shell session only; it does not persist after the task completes.
+
+> **Note:** This bypasses the system crypto-policy for that session, including
+> any FIPS-mode enforcement.  The permanent fix at the OS level is to correct
+> `/etc/ssl/openssl.cnf` or run `sudo update-crypto-policies --set DEFAULT`
+> (requires OS-team involvement).
+
+### Layer 2 — `--trusted-host` + Artifactory `--index-url`
+
+```bash
+python3 get-pip.py --user \
+  --trusted-host pypi.org \
+  --trusted-host files.pythonhosted.org \
+  --trusted-host {{ py_artifactory | urlsplit('hostname') }} \
+  --index-url {{ py_artifactory }}
+```
+
+Routes all pip traffic through the internal Artifactory PyPI mirror and
+disables TLS certificate verification for the listed hosts.  This is the
+standard pattern for corporate air-gapped environments.
+
+### Layer 3 — Bundled `get-pip.py`
+
+`get-pip.py` is bundled at:
+```
+roles/solace_ansible_pip_addon/files/get-pip.py
+```
+and copied to the solace user's home directory before bootstrapping, instead
+of being downloaded via `wget` at runtime.  This avoids a chicken-and-egg
+problem where `wget` itself would hit the same SSL failure.
+
+> **Original source:**  
+> `https://artifactory.global.example.com/artifactory/generic-cloud_local/com.ex.cloud/runtime/get-pip.py`
+
+---
+
+## Files Changed
+
+| File | Change |
+|---|---|
+| `roles/admin_setup_podman/tasks/main.yaml` | Added pip presence check, copy of bundled `get-pip.py`, bootstrap task with `OPENSSL_CONF=/dev/null`, and `podman-compose` pip install — all using Layer 1 + Layer 2 |
+| `roles/solace_ansible_pip_addon/tasks/install-pip-lxml-and-jmespath-certifi-xmltodict.yml` | Added `OPENSSL_CONF=/dev/null` to pip bootstrap and all `pip install` calls; switched from `wget` to bundled file copy |
+
+---
+
+## Is This a Standard Approach?
+
+| Technique | Standard? | Notes |
+|---|---|---|
+| Bundling `get-pip.py` locally | ✅ Yes | Recommended by [official pip docs](https://pip.pypa.io/en/stable/installation/) for offline/air-gapped installs |
+| `--trusted-host` + `--index-url` | ✅ Yes | Standard pip flags for internal PyPI mirrors (Artifactory, Nexus, etc.) |
+| `OPENSSL_CONF=/dev/null` | ⚠️ Workaround | Widely documented fix for `_ssl.c:3179` on RHEL9/FIPS hosts; scoped to the shell session only.  The root cause should be fixed at the OS level by the infrastructure team. |
+
+---
+
+## Recommended OS-Level Fix (Out of Scope for This Repo)
+
+Ask the infrastructure/OS team to resolve the broken OpenSSL configuration on
+the affected CN machines:
+
+```bash
+# Option A — reset crypto-policy to default
+sudo update-crypto-policies --set DEFAULT
+
+# Option B — validate the openssl config
+openssl version -a
+openssl req -new -x509 -key /dev/null 2>&1   # should not crash
+```
+
+Once the host SSL config is repaired, `OPENSSL_CONF=/dev/null` can be removed
+from the Ansible tasks.
+
