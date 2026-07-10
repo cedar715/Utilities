@@ -1,51 +1,152 @@
-2026-07-10T03:18:31.5656448Z TASK [***_setup_podman : Setup podman deps] **********************************
-2026-07-10T03:18:46.5570935Z An exception occurred during task execution. To see the full traceback, use -vvv. The error was: ssl.SSLError: [SSL] error in system default config (_ssl.c:3179)
-2026-07-10T03:18:46.5576505Z fatal: [machine2]: FAILED! => {"changed": false, "module_stderr": "Shared connection to cnshdlxj2b7z401.cn.example.com closed.\r\n", "module_stdout": "Traceback (most recent call last):\r\n  File \"/tmp/ansible_dnf_payload_hzz94es2/ansible_dnf_payload.zip/ansible/module_utils/urls.py\", line 99, in <module>\r\n  File \"/usr/lib/python3.9/site-packages/urllib3/contrib/pyopenssl.py\", line 50, in <module>\r\n    import OpenSSL.SSL\r\nModuleNotFoundError: No module named 'OpenSSL'\r\n\r\nDuring handling of the above exception, another exception occurred:\r\n\r\nTraceback (most recent call last):\r\n  File \"/tmp/.ansible-emerg1/tmp/ansible-tmp-1783653520.8749993-1257828-187175628912405/AnsiballZ_dnf.py\", line 102, in <module>\r\n    _ansiballz_main()\r\n  File \"/tmp/.ansible-emerg1/tmp/ansible-tmp-1783653520.8749993-1257828-187175628912405/AnsiballZ_dnf.py\", line 94, in _ansiballz_main\r\n    invoke_module(zipped_mod, temp_path, ANSIBALLZ_PARAMS)\r\n  File \"/tmp/.ansible-emerg1/tmp/ansible-tmp-1783653520.8749993-1257828-187175628912405/AnsiballZ_dnf.py\", line 40, in invoke_module\r\n    runpy.run_module(mod_name='ansible.modules.packaging.os.dnf', init_globals=None, run_name='__main__', alter_sys=True)\r\n  File \"/usr/lib64/python3.9/runpy.py\", line 225, in run_module\r\n    return _run_module_code(code, init_globals, run_name, mod_spec)\r\n  File \"/usr/lib64/python3.9/runpy.py\", line 97, in _run_module_code\r\n    _run_code(code, mod_globals, init_globals,\r\n  File \"/usr/lib64/python3.9/runpy.py\", line 87, in _run_code\r\n    exec(code, run_globals)\r\n  File \"/tmp/ansible_dnf_payload_hzz94es2/ansible_dnf_payload.zip/ansible/modules/packaging/os/dnf.py\", line 309, in <module>\r\n  File \"<frozen importlib._bootstrap>\", line 1007, in _find_and_load\r\n  File \"<frozen importlib._bootstrap>\", line 986, in _find_and_load_unlocked\r\n  File \"<frozen importlib._bootstrap>\", line 664, in _load_unlocked\r\n  File \"<frozen importlib._bootstrap>\", line 627, in _load_backward_compatible\r\n  File \"<frozen zipimport>\", line 259, in load_module\r\n  File \"/tmp/ansible_dnf_payload_hzz94es2/ansible_dnf_payload.zip/ansible/module_utils/urls.py\", line 101, in <module>\r\n  File \"/usr/lib/python3.9/site-packages/requests/__init__.py\", line 121, in <module>\r\n    from .api import request, get, head, post, patch, put, delete, options\r\n  File \"/usr/lib/python3.9/site-packages/requests/api.py\", line 13, in <module>\r\n    from . import sessions\r\n  File \"/usr/lib/python3.9/site-packages/requests/sessions.py\", line 28, in <module>\r\n    from .adapters import HTTPAdapter\r\n  File \"/usr/lib/python3.9/site-packages/requests/adapters.py\", line 59, in <module>\r\n    _preloaded_ssl_context = create_urllib3_context()\r\n  File \"/usr/lib/python3.9/site-packages/urllib3/util/ssl_.py\", line 290, in create_urllib3_context\r\n    context = SSLContext(ssl_version)\r\n  File \"/usr/lib64/python3.9/ssl.py\", line 484, in __new__\r\n    self = _SSLContext.__new__(cls, protocol)\r\nssl.SSLError: [SSL] error in system default config (_ssl.c:3179)\r\n", "msg": "MODULE FAILURE\nSee stdout/stderr for the exact error", "rc": 1}
-2026-07-10T03:18:46.5582950Z ...ignoring
-2026-07-10T03:18:46.6050905Z An exception occurred during task execution. To see the full traceback, use -vvv. The error was: ssl.SSLError: [SSL] error in system default config (_ssl.c:3179)
-2026-07-10T03:18:46.6056575Z fatal: [machine1]: FAILED! => {"changed": false, "module_stderr": "Shared connection to cnshdlxj2b7z400.cn.example.com closed.\r\n", "module_stdout": "Traceback (most recent call last):\r\n  File \"/tmp/ansible_dnf_payload_k_4k2sgn/ansible_dnf_payload.zip/ansible/module_utils/urls.py\", line 99, in <module>\r\n  File \"/usr/lib/python3.9/site-packages/urllib3/contrib/pyopenssl.py\", line 50, in <module>\r\n    import OpenSSL.SSL\r\nModuleNotFoundError: No module named 'OpenSSL'\r\n\r\nDuring handling of the above exception, another exception occurred:\r\n\r\nTraceback (most recent call last):\r\n  File \"/tmp/.ansible-emerg1/tmp/ansible-tmp-1783653520.8748639-1257827-273512812861885/AnsiballZ_dnf.py\", line 102, in <module>\r\n    _ansiballz_main()\r\n  File \"/tmp/.ansible-emerg1/tmp/ansible-tmp-1783653520.8748639-1257827-273512812861885/AnsiballZ_dnf.py\", line 94, in _ansiballz_main\r\n    invoke_module(zipped_mod, temp_path, ANSIBALLZ_PARAMS)\r\n  File \"/tmp/.ansible-emerg1/tmp/ansible-tmp-1783653520.8748639-1257827-273512812861885/AnsiballZ_dnf.py\", line 40, in invoke_module\r\n    runpy.run_module(mod_name='ansible.modules.packaging.os.dnf', init_globals=None, run_name='__main__', alter_sys=True)\r\n  File \"/usr/lib64/python3.9/runpy.py\", line 225, in run_module\r\n    return _run_module_code(code, init_globals, run_name, mod_spec)\r\n  File \"/usr/lib64/python3.9/runpy.py\", line 97, in _run_module_code\r\n    _run_code(code, mod_globals, init_globals,\r\n  File \"/usr/lib64/python3.9/runpy.py\", line 87, in _run_code\r\n    exec(code, run_globals)\r\n  File \"/tmp/ansible_dnf_payload_k_4k2sgn/ansible_dnf_payload.zip/ansible/modules/packaging/os/dnf.py\", line 309, in <module>\r\n  File \"<frozen importlib._bootstrap>\", line 1007, in _find_and_load\r\n  File \"<frozen importlib._bootstrap>\", line 986, in _find_and_load_unlocked\r\n  File \"<frozen importlib._bootstrap>\", line 664, in _load_unlocked\r\n  File \"<frozen importlib._bootstrap>\", line 627, in _load_backward_compatible\r\n  File \"<frozen zipimport>\", line 259, in load_module\r\n  File \"/tmp/ansible_dnf_payload_k_4k2sgn/ansible_dnf_payload.zip/ansible/module_utils/urls.py\", line 101, in <module>\r\n  File \"/usr/lib/python3.9/site-packages/requests/__init__.py\", line 121, in <module>\r\n    from .api import request, get, head, post, patch, put, delete, options\r\n  File \"/usr/lib/python3.9/site-packages/requests/api.py\", line 13, in <module>\r\n    from . import sessions\r\n  File \"/usr/lib/python3.9/site-packages/requests/sessions.py\", line 28, in <module>\r\n    from .adapters import HTTPAdapter\r\n  File \"/usr/lib/python3.9/site-packages/requests/adapters.py\", line 59, in <module>\r\n    _preloaded_ssl_context = create_urllib3_context()\r\n  File \"/usr/lib/python3.9/site-packages/urllib3/util/ssl_.py\", line 290, in create_urllib3_context\r\n    context = SSLContext(ssl_version)\r\n  File \"/usr/lib64/python3.9/ssl.py\", line 484, in __new__\r\n    self = _SSLContext.__new__(cls, protocol)\r\nssl.SSLError: [SSL] error in system default config (_ssl.c:3179)\r\n", "msg": "MODULE FAILURE\nSee stdout/stderr for the exact error", "rc": 1}
-2026-07-10T03:18:46.6062102Z ...ignoring
-2026-07-10T03:18:46.7557891Z An exception occurred during task execution. To see the full traceback, use -vvv. The error was: ssl.SSLError: [SSL] error in system default config (_ssl.c:3179)
-2026-07-10T03:18:46.7563915Z fatal: [machine3]: FAILED! => {"changed": false, "module_stderr": "Shared connection to cnshdlxj2b7z402.cn.example.com closed.\r\n", "module_stdout": "Traceback (most recent call last):\r\n  File \"/tmp/ansible_dnf_payload_tuengquy/ansible_dnf_payload.zip/ansible/module_utils/urls.py\", line 99, in <module>\r\n  File \"/usr/lib/python3.9/site-packages/urllib3/contrib/pyopenssl.py\", line 50, in <module>\r\n    import OpenSSL.SSL\r\nModuleNotFoundError: No module named 'OpenSSL'\r\n\r\nDuring handling of the above exception, another exception occurred:\r\n\r\nTraceback (most recent call last):\r\n  File \"/tmp/.ansible-emerg1/tmp/ansible-tmp-1783653520.8750064-1257829-272986657830689/AnsiballZ_dnf.py\", line 102, in <module>\r\n    _ansiballz_main()\r\n  File \"/tmp/.ansible-emerg1/tmp/ansible-tmp-1783653520.8750064-1257829-272986657830689/AnsiballZ_dnf.py\", line 94, in _ansiballz_main\r\n    invoke_module(zipped_mod, temp_path, ANSIBALLZ_PARAMS)\r\n  File \"/tmp/.ansible-emerg1/tmp/ansible-tmp-1783653520.8750064-1257829-272986657830689/AnsiballZ_dnf.py\", line 40, in invoke_module\r\n    runpy.run_module(mod_name='ansible.modules.packaging.os.dnf', init_globals=None, run_name='__main__', alter_sys=True)\r\n  File \"/usr/lib64/python3.9/runpy.py\", line 225, in run_module\r\n    return _run_module_code(code, init_globals, run_name, mod_spec)\r\n  File \"/usr/lib64/python3.9/runpy.py\", line 97, in _run_module_code\r\n    _run_code(code, mod_globals, init_globals,\r\n  File \"/usr/lib64/python3.9/runpy.py\", line 87, in _run_code\r\n    exec(code, run_globals)\r\n  File \"/tmp/ansible_dnf_payload_tuengquy/ansible_dnf_payload.zip/ansible/modules/packaging/os/dnf.py\", line 309, in <module>\r\n  File \"<frozen importlib._bootstrap>\", line 1007, in _find_and_load\r\n  File \"<frozen importlib._bootstrap>\", line 986, in _find_and_load_unlocked\r\n  File \"<frozen importlib._bootstrap>\", line 664, in _load_unlocked\r\n  File \"<frozen importlib._bootstrap>\", line 627, in _load_backward_compatible\r\n  File \"<frozen zipimport>\", line 259, in load_module\r\n  File \"/tmp/ansible_dnf_payload_tuengquy/ansible_dnf_payload.zip/ansible/module_utils/urls.py\", line 101, in <module>\r\n  File \"/usr/lib/python3.9/site-packages/requests/__init__.py\", line 121, in <module>\r\n    from .api import request, get, head, post, patch, put, delete, options\r\n  File \"/usr/lib/python3.9/site-packages/requests/api.py\", line 13, in <module>\r\n    from . import sessions\r\n  File \"/usr/lib/python3.9/site-packages/requests/sessions.py\", line 28, in <module>\r\n    from .adapters import HTTPAdapter\r\n  File \"/usr/lib/python3.9/site-packages/requests/adapters.py\", line 59, in <module>\r\n    _preloaded_ssl_context = create_urllib3_context()\r\n  File \"/usr/lib/python3.9/site-packages/urllib3/util/ssl_.py\", line 290, in create_urllib3_context\r\n    context = SSLContext(ssl_version)\r\n  File \"/usr/lib64/python3.9/ssl.py\", line 484, in __new__\r\n    self = _SSLContext.__new__(cls, protocol)\r\nssl.SSLError: [SSL] error in system default config (_ssl.c:3179)\r\n", "msg": "MODULE FAILURE\nSee stdout/stderr for the exact error", "rc": 1}
-2026-07-10T03:18:46.7569400Z ...ignoring
-2026-07-10T03:18:46.7833486Z 
-2026-07-10T03:18:46.7834416Z TASK [***_setup_podman : Install podman and deps] ****************************
-2026-07-10T03:18:52.3185258Z An exception occurred during task execution. To see the full traceback, use -vvv. The error was: ssl.SSLError: [SSL] error in system default config (_ssl.c:3179)
-2026-07-10T03:18:52.3191240Z fatal: [machine2]: FAILED! => {"changed": false, "module_stderr": "Shared connection to cnshdlxj2b7z401.cn.example.com closed.\r\n", "module_stdout": "Traceback (most recent call last):\r\n  File \"/tmp/ansible_dnf_payload_jn6yx8mn/ansible_dnf_payload.zip/ansible/module_utils/urls.py\", line 99, in <module>\r\n  File \"/usr/lib/python3.9/site-packages/urllib3/contrib/pyopenssl.py\", line 50, in <module>\r\n    import OpenSSL.SSL\r\nModuleNotFoundError: No module named 'OpenSSL'\r\n\r\nDuring handling of the above exception, another exception occurred:\r\n\r\nTraceback (most recent call last):\r\n  File \"/tmp/.ansible-emerg1/tmp/ansible-tmp-1783653527.1657338-1257885-163819727112195/AnsiballZ_dnf.py\", line 102, in <module>\r\n    _ansiballz_main()\r\n  File \"/tmp/.ansible-emerg1/tmp/ansible-tmp-1783653527.1657338-1257885-163819727112195/AnsiballZ_dnf.py\", line 94, in _ansiballz_main\r\n    invoke_module(zipped_mod, temp_path, ANSIBALLZ_PARAMS)\r\n  File \"/tmp/.ansible-emerg1/tmp/ansible-tmp-1783653527.1657338-1257885-163819727112195/AnsiballZ_dnf.py\", line 40, in invoke_module\r\n    runpy.run_module(mod_name='ansible.modules.packaging.os.dnf', init_globals=None, run_name='__main__', alter_sys=True)\r\n  File \"/usr/lib64/python3.9/runpy.py\", line 225, in run_module\r\n    return _run_module_code(code, init_globals, run_name, mod_spec)\r\n  File \"/usr/lib64/python3.9/runpy.py\", line 97, in _run_module_code\r\n    _run_code(code, mod_globals, init_globals,\r\n  File \"/usr/lib64/python3.9/runpy.py\", line 87, in _run_code\r\n    exec(code, run_globals)\r\n  File \"/tmp/ansible_dnf_payload_jn6yx8mn/ansible_dnf_payload.zip/ansible/modules/packaging/os/dnf.py\", line 309, in <module>\r\n  File \"<frozen importlib._bootstrap>\", line 1007, in _find_and_load\r\n  File \"<frozen importlib._bootstrap>\", line 986, in _find_and_load_unlocked\r\n  File \"<frozen importlib._bootstrap>\", line 664, in _load_unlocked\r\n  File \"<frozen importlib._bootstrap>\", line 627, in _load_backward_compatible\r\n  File \"<frozen zipimport>\", line 259, in load_module\r\n  File \"/tmp/ansible_dnf_payload_jn6yx8mn/ansible_dnf_payload.zip/ansible/module_utils/urls.py\", line 101, in <module>\r\n  File \"/usr/lib/python3.9/site-packages/requests/__init__.py\", line 121, in <module>\r\n    from .api import request, get, head, post, patch, put, delete, options\r\n  File \"/usr/lib/python3.9/site-packages/requests/api.py\", line 13, in <module>\r\n    from . import sessions\r\n  File \"/usr/lib/python3.9/site-packages/requests/sessions.py\", line 28, in <module>\r\n    from .adapters import HTTPAdapter\r\n  File \"/usr/lib/python3.9/site-packages/requests/adapters.py\", line 59, in <module>\r\n    _preloaded_ssl_context = create_urllib3_context()\r\n  File \"/usr/lib/python3.9/site-packages/urllib3/util/ssl_.py\", line 290, in create_urllib3_context\r\n    context = SSLContext(ssl_version)\r\n  File \"/usr/lib64/python3.9/ssl.py\", line 484, in __new__\r\n    self = _SSLContext.__new__(cls, protocol)\r\nssl.SSLError: [SSL] error in system default config (_ssl.c:3179)\r\n", "msg": "MODULE FAILURE\nSee stdout/stderr for the exact error", "rc": 1}
-2026-07-10T03:18:52.3197043Z ...ignoring
-2026-07-10T03:18:52.5485298Z An exception occurred during task execution. To see the full traceback, use -vvv. The error was: ssl.SSLError: [SSL] error in system default config (_ssl.c:3179)
-2026-07-10T03:18:52.5490779Z fatal: [machine3]: FAILED! => {"changed": false, "module_stderr": "Shared connection to cnshdlxj2b7z402.cn.example.com closed.\r\n", "module_stdout": "Traceback (most recent call last):\r\n  File \"/tmp/ansible_dnf_payload_czqx7gwq/ansible_dnf_payload.zip/ansible/module_utils/urls.py\", line 99, in <module>\r\n  File \"/usr/lib/python3.9/site-packages/urllib3/contrib/pyopenssl.py\", line 50, in <module>\r\n    import OpenSSL.SSL\r\nModuleNotFoundError: No module named 'OpenSSL'\r\n\r\nDuring handling of the above exception, another exception occurred:\r\n\r\nTraceback (most recent call last):\r\n  File \"/tmp/.ansible-emerg1/tmp/ansible-tmp-1783653527.1865401-1257886-270747738536526/AnsiballZ_dnf.py\", line 102, in <module>\r\n    _ansiballz_main()\r\n  File \"/tmp/.ansible-emerg1/tmp/ansible-tmp-1783653527.1865401-1257886-270747738536526/AnsiballZ_dnf.py\", line 94, in _ansiballz_main\r\n    invoke_module(zipped_mod, temp_path, ANSIBALLZ_PARAMS)\r\n  File \"/tmp/.ansible-emerg1/tmp/ansible-tmp-1783653527.1865401-1257886-270747738536526/AnsiballZ_dnf.py\", line 40, in invoke_module\r\n    runpy.run_module(mod_name='ansible.modules.packaging.os.dnf', init_globals=None, run_name='__main__', alter_sys=True)\r\n  File \"/usr/lib64/python3.9/runpy.py\", line 225, in run_module\r\n    return _run_module_code(code, init_globals, run_name, mod_spec)\r\n  File \"/usr/lib64/python3.9/runpy.py\", line 97, in _run_module_code\r\n    _run_code(code, mod_globals, init_globals,\r\n  File \"/usr/lib64/python3.9/runpy.py\", line 87, in _run_code\r\n    exec(code, run_globals)\r\n  File \"/tmp/ansible_dnf_payload_czqx7gwq/ansible_dnf_payload.zip/ansible/modules/packaging/os/dnf.py\", line 309, in <module>\r\n  File \"<frozen importlib._bootstrap>\", line 1007, in _find_and_load\r\n  File \"<frozen importlib._bootstrap>\", line 986, in _find_and_load_unlocked\r\n  File \"<frozen importlib._bootstrap>\", line 664, in _load_unlocked\r\n  File \"<frozen importlib._bootstrap>\", line 627, in _load_backward_compatible\r\n  File \"<frozen zipimport>\", line 259, in load_module\r\n  File \"/tmp/ansible_dnf_payload_czqx7gwq/ansible_dnf_payload.zip/ansible/module_utils/urls.py\", line 101, in <module>\r\n  File \"/usr/lib/python3.9/site-packages/requests/__init__.py\", line 121, in <module>\r\n    from .api import request, get, head, post, patch, put, delete, options\r\n  File \"/usr/lib/python3.9/site-packages/requests/api.py\", line 13, in <module>\r\n    from . import sessions\r\n  File \"/usr/lib/python3.9/site-packages/requests/sessions.py\", line 28, in <module>\r\n    from .adapters import HTTPAdapter\r\n  File \"/usr/lib/python3.9/site-packages/requests/adapters.py\", line 59, in <module>\r\n    _preloaded_ssl_context = create_urllib3_context()\r\n  File \"/usr/lib/python3.9/site-packages/urllib3/util/ssl_.py\", line 290, in create_urllib3_context\r\n    context = SSLContext(ssl_version)\r\n  File \"/usr/lib64/python3.9/ssl.py\", line 484, in __new__\r\n    self = _SSLContext.__new__(cls, protocol)\r\nssl.SSLError: [SSL] error in system default config (_ssl.c:3179)\r\n", "msg": "MODULE FAILURE\nSee stdout/stderr for the exact error", "rc": 1}
-2026-07-10T03:18:52.5497409Z ...ignoring
-2026-07-10T03:18:52.6205310Z An exception occurred during task execution. To see the full traceback, use -vvv. The error was: ssl.SSLError: [SSL] error in system default config (_ssl.c:3179)
-2026-07-10T03:18:52.6212360Z fatal: [machine1]: FAILED! => {"changed": false, "module_stderr": "Shared connection to cnshdlxj2b7z400.cn.example.com closed.\r\n", "module_stdout": "Traceback (most recent call last):\r\n  File \"/tmp/ansible_dnf_payload_3r6s3y0l/ansible_dnf_payload.zip/ansible/module_utils/urls.py\", line 99, in <module>\r\n  File \"/usr/lib/python3.9/site-packages/urllib3/contrib/pyopenssl.py\", line 50, in <module>\r\n    import OpenSSL.SSL\r\nModuleNotFoundError: No module named 'OpenSSL'\r\n\r\nDuring handling of the above exception, another exception occurred:\r\n\r\nTraceback (most recent call last):\r\n  File \"/tmp/.ansible-emerg1/tmp/ansible-tmp-1783653527.1639462-1257884-196500048327503/AnsiballZ_dnf.py\", line 102, in <module>\r\n    _ansiballz_main()\r\n  File \"/tmp/.ansible-emerg1/tmp/ansible-tmp-1783653527.1639462-1257884-196500048327503/AnsiballZ_dnf.py\", line 94, in _ansiballz_main\r\n    invoke_module(zipped_mod, temp_path, ANSIBALLZ_PARAMS)\r\n  File \"/tmp/.ansible-emerg1/tmp/ansible-tmp-1783653527.1639462-1257884-196500048327503/AnsiballZ_dnf.py\", line 40, in invoke_module\r\n    runpy.run_module(mod_name='ansible.modules.packaging.os.dnf', init_globals=None, run_name='__main__', alter_sys=True)\r\n  File \"/usr/lib64/python3.9/runpy.py\", line 225, in run_module\r\n    return _run_module_code(code, init_globals, run_name, mod_spec)\r\n  File \"/usr/lib64/python3.9/runpy.py\", line 97, in _run_module_code\r\n    _run_code(code, mod_globals, init_globals,\r\n  File \"/usr/lib64/python3.9/runpy.py\", line 87, in _run_code\r\n    exec(code, run_globals)\r\n  File \"/tmp/ansible_dnf_payload_3r6s3y0l/ansible_dnf_payload.zip/ansible/modules/packaging/os/dnf.py\", line 309, in <module>\r\n  File \"<frozen importlib._bootstrap>\", line 1007, in _find_and_load\r\n  File \"<frozen importlib._bootstrap>\", line 986, in _find_and_load_unlocked\r\n  File \"<frozen importlib._bootstrap>\", line 664, in _load_unlocked\r\n  File \"<frozen importlib._bootstrap>\", line 627, in _load_backward_compatible\r\n  File \"<frozen zipimport>\", line 259, in load_module\r\n  File \"/tmp/ansible_dnf_payload_3r6s3y0l/ansible_dnf_payload.zip/ansible/module_utils/urls.py\", line 101, in <module>\r\n  File \"/usr/lib/python3.9/site-packages/requests/__init__.py\", line 121, in <module>\r\n    from .api import request, get, head, post, patch, put, delete, options\r\n  File \"/usr/lib/python3.9/site-packages/requests/api.py\", line 13, in <module>\r\n    from . import sessions\r\n  File \"/usr/lib/python3.9/site-packages/requests/sessions.py\", line 28, in <module>\r\n    from .adapters import HTTPAdapter\r\n  File \"/usr/lib/python3.9/site-packages/requests/adapters.py\", line 59, in <module>\r\n    _preloaded_ssl_context = create_urllib3_context()\r\n  File \"/usr/lib/python3.9/site-packages/urllib3/util/ssl_.py\", line 290, in create_urllib3_context\r\n    context = SSLContext(ssl_version)\r\n  File \"/usr/lib64/python3.9/ssl.py\", line 484, in __new__\r\n    self = _SSLContext.__new__(cls, protocol)\r\nssl.SSLError: [SSL] error in system default config (_ssl.c:3179)\r\n", "msg": "MODULE FAILURE\nSee stdout/stderr for the exact error", "rc": 1}
-2026-07-10T03:18:52.6218227Z ...ignoring
-2026-07-10T03:18:52.6470893Z 
-2026-07-10T03:18:52.6471949Z TASK [***_setup_podman : Check and set capabilities for /usr/bin/newuidmap] ***
-2026-07-10T03:18:57.2549931Z changed: [machine2]
-2026-07-10T03:18:57.5062677Z changed: [machine3]
-2026-07-10T03:18:57.7469136Z changed: [machine1]
-2026-07-10T03:18:57.7744487Z 
-2026-07-10T03:18:57.7745378Z TASK [***_setup_podman : Check if pip is available for the solace user] ******
-2026-07-10T03:19:02.6331322Z ok: [machine2]
-2026-07-10T03:19:02.6381935Z ok: [machine3]
-2026-07-10T03:19:03.1301306Z ok: [machine1]
-2026-07-10T03:19:03.1554905Z 
-2026-07-10T03:19:03.1555876Z TASK [***_setup_podman : Copy get-pip.py for solace user (fallback if python3-pip package is unavailable)] ***
-2026-07-10T03:19:07.7947882Z ok: [machine2]
-2026-07-10T03:19:08.0370027Z ok: [machine1]
-2026-07-10T03:19:08.0498974Z ok: [machine3]
-2026-07-10T03:19:08.0758196Z 
-2026-07-10T03:19:08.0759123Z TASK [***_setup_podman : Bootstrap pip for solace user via get-pip.py] *******
-2026-07-10T03:19:22.1650996Z [WARNING]: Consider using 'become', 'become_method', and 'become_user' rather
-2026-07-10T03:19:22.1651594Z than running su
-2026-07-10T03:19:22.1654171Z fatal: [machine1]: FAILED! => {"changed": true, "cmd": "su -s /bin/bash - solace -c  \"python3 ~/get-pip.py --user --trusted-host pypi.org --trusted-host files.pythonhosted.org --index-url https://artifactory.global.example.com/artifactory/api/pypi/pypi/simple\"\n", "delta": "0:00:09.179448", "end": "2026-07-10 03:19:21.477508", "msg": "non-zero return code", "rc": 1, "start": "2026-07-10 03:19:12.298060", "stderr": "  Could not find a version that satisfies the requirement pip (from versions: )\nNo matching distribution found for pip", "stderr_lines": ["  Could not find a version that satisfies the requirement pip (from versions: )", "No matching distribution found for pip"], "stdout": "Collecting pip\n  Could not fetch URL https://artifactory.global.example.com/artifactory/api/pypi/pypi/simple/pip/: There was a problem confirming the ssl certificate: [SSL] error in system default config (_ssl.c:3179) - skipping", "stdout_lines": ["Collecting pip", "  Could not fetch URL https://artifactory.global.example.com/artifactory/api/pypi/pypi/simple/pip/: There was a problem confirming the ssl certificate: [SSL] error in system default config (_ssl.c:3179) - skipping"]}
-2026-07-10T03:19:22.3552437Z fatal: [machine3]: FAILED! => {"changed": true, "cmd": "su -s /bin/bash - solace -c  \"python3 ~/get-pip.py --user --trusted-host pypi.org --trusted-host files.pythonhosted.org --index-url https://artifactory.global.example.com/artifactory/api/pypi/pypi/simple\"\n", "delta": "0:00:09.165977", "end": "2026-07-10 03:19:21.716863", "msg": "non-zero return code", "rc": 1, "start": "2026-07-10 03:19:12.550886", "stderr": "  Could not find a version that satisfies the requirement pip (from versions: )\nNo matching distribution found for pip", "stderr_lines": ["  Could not find a version that satisfies the requirement pip (from versions: )", "No matching distribution found for pip"], "stdout": "Collecting pip\n  Could not fetch URL https://artifactory.global.example.com/artifactory/api/pypi/pypi/simple/pip/: There was a problem confirming the ssl certificate: [SSL] error in system default config (_ssl.c:3179) - skipping", "stdout_lines": ["Collecting pip", "  Could not fetch URL https://artifactory.global.example.com/artifactory/api/pypi/pypi/simple/pip/: There was a problem confirming the ssl certificate: [SSL] error in system default config (_ssl.c:3179) - skipping"]}
-2026-07-10T03:19:23.7441556Z fatal: [machine2]: FAILED! => {"changed": true, "cmd": "su -s /bin/bash - solace -c  \"python3 ~/get-pip.py --user --trusted-host pypi.org --trusted-host files.pythonhosted.org --index-url https://artifactory.global.example.com/artifactory/api/pypi/pypi/simple\"\n", "delta": "0:00:09.188015", "end": "2026-07-10 03:19:23.108895", "msg": "non-zero return code", "rc": 1, "start": "2026-07-10 03:19:13.920880", "stderr": "  Could not find a version that satisfies the requirement pip (from versions: )\nNo matching distribution found for pip", "stderr_lines": ["  Could not find a version that satisfies the requirement pip (from versions: )", "No matching distribution found for pip"], "stdout": "Collecting pip\n  Could not fetch URL https://artifactory.global.example.com/artifactory/api/pypi/pypi/simple/pip/: There was a problem confirming the ssl certificate: [SSL] error in system default config (_ssl.c:3179) - skipping", "stdout_lines": ["Collecting pip", "  Could not fetch URL https://artifactory.global.example.com/artifactory/api/pypi/pypi/simple/pip/: There was a problem confirming the ssl certificate: [SSL] error in system default config (_ssl.c:3179) - skipping"]}
-2026-07-10T03:19:23.7456931Z 
-2026-07-10T03:19:23.7457889Z PLAY RECAP *********************************************************************
-2026-07-10T03:19:23.7458914Z machine1                   : ok=32   changed=10   unreachable=0    failed=1    skipped=15   rescued=0    ignored=2   
-2026-07-10T03:19:23.7459667Z machine2                   : ok=32   changed=10   unreachable=0    failed=1    skipped=15   rescued=0    ignored=2   
-2026-07-10T03:19:23.7460420Z machine3                   : ok=32   changed=10   unreachable=0    failed=1    skipped=15   rescued=0    ignored=2   
-2026-07-10T03:19:23.7460708Z 
-2026-07-10T03:19:24.1184454Z 
-2026-07-10T03:19:24.1355590Z ##[section]Finishing: Execute Solace Admin Setup
+---
+# diagnose_ssl_config.yml
+#
+# Purpose: pinpoint the "[SSL] error in system default config (_ssl.c:3179)"
+# that is breaking dnf / requests / get-pip on the CN podman hosts.
+#
+# Safe by design: every task uses command / shell / slurp / stat.
+# None of these construct a Python SSLContext, so they will NOT hit the
+# same failure that dnf/uri/get_url do. All results are printed to the
+# Ansible output so you can read them straight from the run log.
+#
+# Run:
+#   ansible-playbook -i <your_inventory> diagnose_ssl_config.yml --limit machine1,machine2,machine3
+#
+# If you cannot escalate on these hosts, set become: false below. The two
+# config files read here are normally world-readable, so it will still work.
+
+- name: Diagnose OpenSSL system-default-config failure
+  hosts: all
+  gather_facts: true
+  become: true
+  any_errors_fatal: false
+
+  tasks:
+
+    # 1. Reproduce the exact failure and capture OpenSSL's own error text.
+    #    This is the ground truth: if this fails, it is host-level, not Ansible.
+    - name: Reproduce SSLContext creation
+      ansible.builtin.command:
+        cmd: >-
+          python3 -c "import ssl;
+          ssl.create_default_context();
+          print('SSL_CONTEXT_OK', ssl.OPENSSL_VERSION)"
+      register: ssl_repro
+      changed_when: false
+      failed_when: false
+
+    - name: Show reproduction result
+      ansible.builtin.debug:
+        msg:
+          - "rc: {{ ssl_repro.rc }}"
+          - "stdout: {{ ssl_repro.stdout | default('') }}"
+          - "stderr: {{ ssl_repro.stderr_lines | default([]) }}"
+
+    # 2. OpenSSL version / build details (which openssl.cnf it uses: OPENSSLDIR).
+    - name: openssl version -a
+      ansible.builtin.command: openssl version -a
+      register: openssl_ver
+      changed_when: false
+      failed_when: false
+
+    - name: Show openssl version
+      ansible.builtin.debug:
+        var: openssl_ver.stdout_lines
+
+    # 3. Current crypto-policy (the usual culprit on RHEL/CentOS 9).
+    - name: update-crypto-policies --show
+      ansible.builtin.command: update-crypto-policies --show
+      register: crypto_policy
+      changed_when: false
+      failed_when: false
+
+    - name: Show crypto policy
+      ansible.builtin.debug:
+        msg: "crypto-policy: {{ crypto_policy.stdout | default('n/a') }} (rc={{ crypto_policy.rc }})"
+
+    # 4. FIPS state. fips_enabled=1 with a non-FIPS policy = classic mismatch.
+    - name: Read /proc/sys/crypto/fips_enabled
+      ansible.builtin.command: cat /proc/sys/crypto/fips_enabled
+      register: fips_enabled
+      changed_when: false
+      failed_when: false
+
+    - name: Show FIPS state
+      ansible.builtin.debug:
+        msg: "fips_enabled: {{ fips_enabled.stdout | default('n/a') }}"
+
+    # 5. A stray OPENSSL_CONF env var pointing at a bad file also triggers this.
+    - name: Check OPENSSL_CONF in environment
+      ansible.builtin.shell: 'echo "OPENSSL_CONF=${OPENSSL_CONF:-<unset>}"'
+      register: openssl_conf_env
+      changed_when: false
+      failed_when: false
+
+    - name: Show OPENSSL_CONF env
+      ansible.builtin.debug:
+        msg: "{{ openssl_conf_env.stdout }}"
+
+    # 6. Locate the system openssl.cnf and confirm it exists.
+    - name: Stat /etc/pki/tls/openssl.cnf
+      ansible.builtin.stat:
+        path: /etc/pki/tls/openssl.cnf
+      register: openssl_cnf_stat
+
+    - name: Slurp openssl.cnf
+      ansible.builtin.slurp:
+        src: /etc/pki/tls/openssl.cnf
+      register: openssl_cnf
+      when: openssl_cnf_stat.stat.exists
+
+    - name: Show the .include lines and [system_default_sect] area of openssl.cnf
+      ansible.builtin.debug:
+        msg: >-
+          {{ (openssl_cnf.content | b64decode).splitlines()
+             | select('search', '(?i)(\.include|system_default|MinProtocol|CipherString|Ciphersuites|Groups|SignatureAlgorithms|Options|Providers)')
+             | list }}
+      when: openssl_cnf_stat.stat.exists
+
+    # 7. Read the crypto-policies OpenSSL backend that openssl.cnf .includes.
+    #    This is where an unsupported/invalid directive most often lives.
+    - name: Stat crypto-policies opensslcnf backend
+      ansible.builtin.stat:
+        path: /etc/crypto-policies/back-ends/opensslcnf.config
+      register: backend_stat
+
+    - name: Slurp crypto-policies opensslcnf backend
+      ansible.builtin.slurp:
+        src: /etc/crypto-policies/back-ends/opensslcnf.config
+      register: backend_cfg
+      when: backend_stat.stat.exists
+
+    - name: Show full crypto-policies opensslcnf backend
+      ansible.builtin.debug:
+        var: (backend_cfg.content | b64decode).splitlines()
+      when: backend_stat.stat.exists
+
+    - name: Note if backend is missing (broken/partial crypto-policies state)
+      ansible.builtin.debug:
+        msg: "MISSING /etc/crypto-policies/back-ends/opensslcnf.config — crypto-policies is in a broken/partial state"
+      when: not backend_stat.stat.exists
+
+    # 8. Force OpenSSL to parse the config directly. Unlike the opaque Python
+    #    message, the C tool often names the exact bad line / directive.
+    - name: Force openssl to load the config (surfaces the parse error)
+      ansible.builtin.command: openssl ciphers -v
+      register: openssl_parse
+      changed_when: false
+      failed_when: false
+
+    - name: Show openssl config-parse result
+      ansible.builtin.debug:
+        msg:
+          - "rc: {{ openssl_parse.rc }}"
+          - "stderr: {{ openssl_parse.stderr_lines | default([]) }}"
+
+    # 9. One-line verdict.
+    - name: Verdict
+      ansible.builtin.debug:
+        msg: >-
+          {{ 'SSL context creation WORKS on this host — problem is elsewhere.'
+             if ssl_repro.rc == 0
+             else 'CONFIRMED host-level OpenSSL config failure. Inspect the [system_default_sect] / crypto-policies backend output above for the offending directive (commonly MinProtocol, CipherString, Ciphersuites, Groups, SignatureAlgorithms, or a FIPS/policy mismatch).' }}
