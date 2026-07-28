@@ -1,3 +1,1 @@
-sol_event_vpn_ad_msg_spool_quota_exceed_total{broker="myHost1.hk",host="myHostName01",kit="myHost1",queue="myQueue","server.address"="myServiceName","server.port"="8081","service.instance.id"="myServiceName:8081","service.name"="log-metrics",severity="WARN","url.scheme"="http",vmrHostAlias="myHost1-a.hk",vpn="myVPN"}
-
-sol_event_vpn_ad_msg_spool_quota_exceed_total{broker="myHost1.hk",host="myHostName02",kit="myHost1",queue="myQueue2","server.address"="myServiceName","server.port"="8081","service.instance.id"="myServiceName:8081","service.name"="log-metrics",severity="WARN","url.scheme"="http",vmrHostAlias="myHost1-b.hk",vpn="myVPN"}
+resets(sol_event_vpn_ad_msg_spool_quota_exceed_total[7d])
