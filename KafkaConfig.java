@@ -1,1 +1,2 @@
-count_over_time(sol_event_system_ha_redun_group_node_left_total[10m])
+count(sol_event_system_ha_redun_group_node_left_total)
+count(sol_event_system_ha_redun_group_node_joined_total)
