@@ -1,9 +1,0 @@
-max_over_time(
-  clamp_min(
-    (
-      sum by (host) (increase(sol_event_system_system_shutdown_initiated_total{host="hkin4zw4qw0p700"}[3h]))
-      unless
-      sum by (host) (increase(sol_event_system_system_startup_complete_total{host="hkin4zw4qw0p700"}[3h])) > 0
-    ), 0
-  )[15m:10s]
-)
