@@ -1,119 +1,44 @@
-@Configuration
-@EnableIntegration
-@Slf4j
-public class OutboundFlowConfig {
+# GitHub Copilot Prompt — Learning Kafka from the Cloned Docs Repo
 
-    @Value("${app.batch.size:1000}")
-    private int batchSize;
+Paste into Copilot Chat (Agent mode, with the repo open as your workspace).
 
-    @Value("${app.batch.timeout:5000}")
-    private long batchTimeout;
+---
 
-    @Value("${app.executor.pool.size:5}")
-    private int executorPoolSize;
+You are my Kafka tutor. This workspace is the Apache Kafka documentation repo. I am new to Kafka and want to learn the system itself — not contribute doc edits. The repo is too large to read linearly, so your job is to be my guide through it.
 
-    @Value("${app.executor.queue.size:10000}")
-    private int executorQueueSize;
+**Ground rules:**
+- Teach only from files in this workspace. Cite the exact file path (and section heading) for every claim.
+- If something isn't covered in these docs, say so explicitly rather than filling in from general knowledge.
+- The docs are versioned — tell me which version directory you're reading from and flag if I'm looking at an outdated one.
 
-    @Autowired
-    @Qualifier("producerChannel")
-    private MessageChannel producerChannel;
+**Step 1 — Orient me.** Scan the repo and give me a map: top-level directory structure, what each major directory contains, how versioning is organized, and which format the docs are in (HTML fragments, Markdown, templates). Identify the single entry-point file a reader should start from. Keep this under 300 words.
 
-    @Autowired
-    private SyslogEventListTransformer transformer;
+**Step 2 — Build a learning path.** Propose an ordered reading list of 10–15 specific files/sections that takes me from zero to competent, grouped into phases:
+1. Core mental model (what Kafka is, log abstraction, topics/partitions/offsets)
+2. Producers and consumers (delivery semantics, consumer groups, rebalancing)
+3. Internals (replication, ISR, controller, storage layout)
+4. Operations (configuration, monitoring, common failure modes)
+5. Ecosystem (Connect, Streams, transactions/exactly-once)
 
-    @Autowired
-    private RotatingFileWriterHandler fileWriter;
+For each item give: file path, ~reading time, the 2–3 questions it answers, and prerequisites. Mark anything I can safely skip on a first pass.
 
-    @Bean
-    public Executor integrationExecutor() {
-        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(executorPoolSize);
-        executor.setMaxPoolSize(executorPoolSize);
-        executor.setQueueCapacity(executorQueueSize);
-        executor.setThreadNamePrefix("integration-");
-        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
-        executor.setWaitForTasksToCompleteOnShutdown(true);
-        executor.setAwaitTerminationSeconds(60);
-        executor.initialize();
-        return executor;
-    }
+**Step 3 — Wait for me.** Do not explain the content yet. After the path, stop and ask which phase I want to start with.
 
-    @Bean
-    public MessageChannel executorChannel() {
-        return new ExecutorChannel(integrationExecutor());
-    }
+**Then, for each section I pick:**
+- Summarize the key concepts in plain language, no jargon unless you define it first
+- Point out the 2–3 things beginners most commonly misunderstand here
+- Give me one concrete scenario showing the concept in action
+- Note where the docs are vague, assume prior knowledge, or contradict another section
+- End with 3 self-check questions I should be able to answer before moving on
 
-    @Bean
-    public SimpleMessageStore messageStore() {
-        SimpleMessageStore store = new SimpleMessageStore();
-        store.setTimeoutOnIdle(true);
-        return store;
-    }
+Start with Step 1 now.
 
-    @Bean
-    public AggregatingMessageHandler aggregator() {
-        CorrelationStrategy correlationStrategy = message -> "batchCorrelator";
-        ReleaseStrategy releaseStrategy = group -> group.size() >= batchSize;
-        
-        AggregatingMessageHandler handler = new AggregatingMessageHandler(
-                new SimpleMessageGroupProcessor(),
-                messageStore()
-        );
-        
-        handler.setCorrelationStrategy(correlationStrategy);
-        handler.setReleaseStrategy(releaseStrategy);
-        handler.setGroupTimeoutExpression(new ValueExpression<>(batchTimeout));
-        handler.setExpireGroupsUponCompletion(true);
-        handler.setOutputProcessor(messageGroup -> {
-            Collection<Message<?>> messages = messageGroup.getMessages();
-            return messages.isEmpty() ? null : messages;
-        });
-        
-        return handler;
-    }
+---
 
-    @Bean
-    public MessageHandler fileWritingHandler() {
-        return message -> {
-            try {
-                String content = (String) message.getPayload();
-                fileWriter.write(content);
-            } catch (Exception e) {
-                log.error("Error writing message to file", e);
-                throw new MessageHandlingException(message, "Failed to write message to file", e);
-            }
-        };
-    }
+## Follow-up prompts worth keeping
 
-    @Bean
-    public IntegrationFlow fileWriterFlow() {
-        return IntegrationFlow.from(producerChannel)
-                .log(LoggingHandler.Level.DEBUG, message -> 
-                    "Received message batch of size: " + 
-                    ((Collection<?>) message.getPayload()).size())
-                .handle(aggregator())
-                .transform(transformer)
-                .channel(executorChannel())
-                .handle(fileWritingHandler())
-                .log(LoggingHandler.Level.DEBUG, "File write completed")
-                .get();
-    }
-
-    @Bean
-    public ErrorHandler errorHandler() {
-        return new ErrorHandler() {
-            @Override
-            public void handleError(Throwable t) {
-                log.error("Error in integration flow", t);
-                // Add any error notification/alerting logic here
-            }
-        };
-    }
-
-    @PostConstruct
-    public void validateConfiguration() {
-        log.info("Integration flow configured with batch size: {}, timeout: {}ms, executor pool size: {}", 
-                batchSize, batchTimeout, executorPoolSize);
-    }
-}
+- "Trace one message end to end through this repo's docs — from `producer.send()` to a consumer committing the offset. Cite every file you pull from and flag any gaps in the narrative."
+- "Compare how these docs describe the ZooKeeper-based controller vs. KRaft. Which files cover each, and what's the migration story?"
+- "I'm reading <FILE>. Find every other file in this repo that touches the same concept, and tell me whether they agree."
+- "Build me a glossary of every Kafka-specific term used in <FILE> before it's defined, with the definition and the file where it's actually defined."
+- "Extract all configuration parameters mentioned across the operations docs into a table: name, default, what breaks if I get it wrong."
