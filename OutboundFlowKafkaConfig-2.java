@@ -1,601 +1,281 @@
-package com.yourcompany.collector.config;
+# Kafka Client Topic Dashboard — design & adaptation guide
 
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.apache.kafka.clients.producer.*;
-import org.apache.kafka.common.errors.RecordTooLargeException;
-import org.apache.kafka.common.errors.TimeoutException;
-import org.apache.kafka.common.serialization.StringSerializer;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Profile;
-import org.springframework.integration.annotation.ServiceActivator;
-import org.springframework.integration.config.EnableIntegration;
-import org.springframework.integration.dsl.IntegrationFlow;
-import org.springframework.integration.dsl.MessageChannels;
-import org.springframework.integration.handler.LoggingHandler;
-import org.springframework.integration.kafka.outbound.KafkaProducerMessageHandler;
-import org.springframework.kafka.core.*;
-import org.springframework.kafka.support.SendResult;
-import org.springframework.kafka.support.serializer.JsonSerializer;
-import org.springframework.messaging.Message;
-import org.springframework.messaging.MessageChannel;
-import org.springframework.messaging.MessageHandler;
-import org.springframework.messaging.support.MessageBuilder;
-import org.springframework.retry.RetryCallback;
-import org.springframework.retry.RetryContext;
-import org.springframework.retry.RetryListener;
-import org.springframework.retry.RetryPolicy;
-import org.springframework.retry.backoff.ExponentialBackOffPolicy;
-import org.springframework.retry.policy.SimpleRetryPolicy;
-import org.springframework.retry.support.RetryTemplate;
-import org.springframework.scheduling.annotation.Scheduled;
-import org.springframework.stereotype.Component;
-import org.springframework.util.concurrent.ListenableFuture;
-import org.springframework.util.concurrent.ListenableFutureCallback;
-import org.springframework.expression.common.LiteralExpression;
+**v1 scope:** single-topic deep dive, broker-side metrics only, Grafana.
+**Deliverable:** `kafka-client-topic-dashboard.json` (uid `kafka-client-topic`).
 
-import java.io.*;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardOpenOption;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.*;
-import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicInteger;
+---
 
-import static org.apache.kafka.clients.producer.ProducerConfig.*;
-import static java.util.Optional.ofNullable;
+## 1. The design principle
 
-@Slf4j
-@Configuration
-@EnableIntegration
-@RequiredArgsConstructor
-@Profile("kafka")
-public class OutboundFlowKafkaConfig {
+A client dashboard is not the platform dashboard with fewer panels. Clients open a
+dashboard for exactly three reasons:
 
-    private static final String APP_NAME = "solace-otel-collector";
-    private final KafkaConfig kafkaConfig;
-    private final AtomicLong successCount = new AtomicLong(0);
-    private final AtomicLong failureCount = new AtomicLong(0);
-    private final AtomicLong dlqCount = new AtomicLong(0);
-    private final AtomicBoolean circuitBreakerOpen = new AtomicBoolean(false);
-    private final AtomicInteger consecutiveFailures = new AtomicInteger(0);
-    private final AtomicLong circuitBreakerOpenTime = new AtomicLong(0);
-    
-    // Circuit breaker thresholds
-    private static final int CIRCUIT_BREAKER_FAILURE_THRESHOLD = 10;
-    private static final long CIRCUIT_BREAKER_TIMEOUT_MS = 30000; // 30 seconds
-    private static final String DLQ_FILE_PATH = "/var/log/kafka-dlq/";
+1. **"Is my consumer keeping up?"** — the daily glance.
+2. **"Something is wrong — is it me or is it Kafka?"** — the 2am question.
+3. **"Am I going to outgrow something?"** — retention and storage, monthly.
 
-    /**
-     * Main Kafka integration flow with circuit breaker.
-     */
-    @Bean
-    public IntegrationFlow kafkaIntegrationFlow(@Qualifier("producerChannel") MessageChannel producerChannel) {
-        return IntegrationFlow.from(producerChannel)
-                .handle(message -> {
-                    // Check circuit breaker
-                    if (isCircuitBreakerOpen()) {
-                        handleCircuitBreakerOpen(message);
-                        return;
-                    }
-                    
-                    // Try to send with retry template
-                    try {
-                        RetryTemplate retryTemplate = kafkaRetryTemplate();
-                        retryTemplate.execute(context -> {
-                            sendToKafka(message);
-                            return null;
-                        });
-                        
-                        // Reset failure counter on success
-                        consecutiveFailures.set(0);
-                        successCount.incrementAndGet();
-                        
-                    } catch (Exception e) {
-                        handleKafkaFailure(message, e);
-                    }
-                })
-                .get();
-    }
+Every panel in this dashboard serves one of those. Broker JVM heap, controller
+elections, ISR churn internals, and per-node CPU are deliberately absent — they
+make a client feel informed without making them able to act.
 
-    /**
-     * Send message to Kafka with callbacks.
-     */
-    private void sendToKafka(Message<?> message) throws Exception {
-        KafkaTemplate<String, SolaceSyslogEvent> template = kafkaTemplate();
-        
-        ListenableFuture<SendResult<String, SolaceSyslogEvent>> future = 
-            template.send(kafkaConfig.getTopic(), 
-                          APP_NAME, 
-                          (SolaceSyslogEvent) message.getPayload());
-        
-        // Add timeout to future.get()
-        SendResult<String, SolaceSyslogEvent> result = future.get(30, TimeUnit.SECONDS);
-        
-        // Log successful send
-        if (log.isDebugEnabled()) {
-            log.debug("Successfully sent message to Kafka partition {} offset {}", 
-                result.getRecordMetadata().partition(),
-                result.getRecordMetadata().offset());
-        }
-    }
+Question 2 is the one with the business case. If the dashboard lets an app team
+self-serve the answer to "is the platform degraded or is it my pods", your team
+stops being the first line of triage for every application incident. That is why
+the **"Is it me, or is it the platform?"** row sits second, above all the detail.
 
-    /**
-     * Handle Kafka send failures.
-     */
-    private void handleKafkaFailure(Message<?> message, Exception e) {
-        failureCount.incrementAndGet();
-        int failures = consecutiveFailures.incrementAndGet();
-        
-        log.error("Failed to send message to Kafka (consecutive failures: {}): {}", 
-            failures, e.getMessage());
-        
-        // Check if we should open circuit breaker
-        if (failures >= CIRCUIT_BREAKER_FAILURE_THRESHOLD) {
-            openCircuitBreaker();
-        }
-        
-        // Determine if we should retry or send to DLQ
-        if (shouldSendToDLQ(e)) {
-            sendToDeadLetterQueue(message, e);
-        } else {
-            // Schedule retry with backoff
-            scheduleRetry(message, e);
-        }
-    }
+---
 
-    /**
-     * Check if circuit breaker is open.
-     */
-    private boolean isCircuitBreakerOpen() {
-        if (circuitBreakerOpen.get()) {
-            long openDuration = System.currentTimeMillis() - circuitBreakerOpenTime.get();
-            if (openDuration > CIRCUIT_BREAKER_TIMEOUT_MS) {
-                // Try to close circuit breaker
-                log.info("Attempting to close circuit breaker after {} ms", openDuration);
-                circuitBreakerOpen.set(false);
-                consecutiveFailures.set(0);
-                return false;
-            }
-            return true;
-        }
-        return false;
-    }
+## 2. Import it
 
-    /**
-     * Open circuit breaker.
-     */
-    private void openCircuitBreaker() {
-        if (circuitBreakerOpen.compareAndSet(false, true)) {
-            circuitBreakerOpenTime.set(System.currentTimeMillis());
-            log.error("Circuit breaker OPENED due to {} consecutive failures", 
-                consecutiveFailures.get());
-        }
-    }
+1. Grafana → Dashboards → New → Import → upload the JSON.
+2. Pick your Prometheus data source when prompted.
+3. Work through §3 below — a handful of metric/label names will need adjusting
+   for your exporter config.
 
-    /**
-     * Handle messages when circuit breaker is open.
-     */
-    private void handleCircuitBreakerOpen(Message<?> message) {
-        log.warn("Circuit breaker is OPEN, sending message directly to DLQ");
-        sendToDeadLetterQueue(message, 
-            new CircuitBreakerOpenException("Circuit breaker is open"));
-    }
+The dashboard has no hardcoded data source UID; it uses a `datasource` template
+variable, so it is portable across environments.
 
-    /**
-     * Determine if exception warrants sending to DLQ immediately.
-     */
-    private boolean shouldSendToDLQ(Exception e) {
-        // Some errors won't be fixed by retry
-        return e instanceof RecordTooLargeException ||
-               e instanceof org.apache.kafka.common.errors.SerializationException ||
-               e instanceof ClassCastException;
-    }
+---
 
-    /**
-     * Schedule message retry with exponential backoff.
-     */
-    private void scheduleRetry(Message<?> message, Exception error) {
-        Integer retryCount = message.getHeaders().get("kafkaRetryCount", Integer.class);
-        if (retryCount == null) retryCount = 0;
-        
-        if (retryCount >= kafkaConfig.getMaxRetries()) {
-            log.error("Max Kafka retries ({}) exceeded", kafkaConfig.getMaxRetries());
-            sendToDeadLetterQueue(message, error);
-            return;
-        }
-        
-        // Calculate exponential backoff
-        long backoffMs = Math.min(
-            (long) Math.pow(2, retryCount) * 1000,
-            30000 // Max 30 seconds
-        );
-        
-        log.info("Scheduling Kafka retry {} after {} ms", retryCount + 1, backoffMs);
-        
-        Message<?> retryMessage = MessageBuilder.fromMessage(message)
-                .setHeader("kafkaRetryCount", retryCount + 1)
-                .setHeader("kafkaRetryReason", error.getMessage())
-                .build();
-        
-        kafkaRetryExecutor().schedule(() -> {
-            try {
-                sendToKafka(retryMessage);
-                consecutiveFailures.set(0);
-                successCount.incrementAndGet();
-            } catch (Exception e) {
-                handleKafkaFailure(retryMessage, e);
-            }
-        }, backoffMs, TimeUnit.MILLISECONDS);
-    }
+## 3. Assumptions to verify before it works
 
-    /**
-     * Enhanced producer error handling flow.
-     */
-    @Bean
-    public IntegrationFlow producerErrorHandlingFlow() {
-        return IntegrationFlow.from(producerErrorChannel())
-                .log(LoggingHandler.Level.ERROR, "KafkaErrorLogger",
-                        message -> String.format("Kafka error: %s", message.getPayload()))
-                .handle(message -> {
-                    if (message.getPayload() instanceof ErrorMessage) {
-                        ErrorMessage errorMessage = (ErrorMessage) message.getPayload();
-                        handleKafkaFailure(errorMessage.getOriginalMessage(), 
-                            (Exception) errorMessage.getPayload());
-                    }
-                })
-                .get();
-    }
+### 3.1 Metric names
 
-    /**
-     * Send message to Dead Letter Queue.
-     */
-    private void sendToDeadLetterQueue(Message<?> message, Exception error) {
-        dlqCount.incrementAndGet();
-        
-        try {
-            // Try to send to Kafka DLQ topic first
-            String dlqTopic = kafkaConfig.getTopic() + ".dlq";
-            KafkaTemplate<String, Object> dlqTemplate = deadLetterKafkaTemplate();
-            
-            Map<String, Object> dlqHeaders = new HashMap<>();
-            dlqHeaders.put("dlq_reason", error.getMessage());
-            dlqHeaders.put("dlq_timestamp", System.currentTimeMillis());
-            dlqHeaders.put("original_topic", kafkaConfig.getTopic());
-            
-            ProducerRecord<String, Object> dlqRecord = new ProducerRecord<>(
-                dlqTopic, null, APP_NAME, message.getPayload(), dlqHeaders);
-            
-            dlqTemplate.send(dlqRecord).get(5, TimeUnit.SECONDS);
-            
-            log.info("Message sent to Kafka DLQ topic: {}", dlqTopic);
-            
-        } catch (Exception dlqException) {
-            log.error("Failed to send to Kafka DLQ, writing to file: {}", 
-                dlqException.getMessage());
-            // Fallback to file
-            writeToDeadLetterFile(message, error);
-        }
-    }
+Built against `danielqsj/kafka_exporter` and the common lowercase JMX exporter
+naming. Check each against your Prometheus and find-replace in the JSON if needed.
 
-    /**
-     * Write failed messages to file system as last resort.
-     */
-    private void writeToDeadLetterFile(Message<?> message, Exception error) {
-        try {
-            Path dlqPath = Paths.get(DLQ_FILE_PATH);
-            if (!Files.exists(dlqPath)) {
-                Files.createDirectories(dlqPath);
-            }
-            
-            String timestamp = LocalDateTime.now()
-                .format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
-            String filename = String.format("dlq_%s_%d.json", 
-                timestamp, System.nanoTime());
-            
-            Path filePath = dlqPath.resolve(filename);
-            
-            Map<String, Object> dlqEntry = new HashMap<>();
-            dlqEntry.put("timestamp", timestamp);
-            dlqEntry.put("error", error.getMessage());
-            dlqEntry.put("payload", message.getPayload());
-            dlqEntry.put("headers", message.getHeaders());
-            
-            String json = new com.fasterxml.jackson.databind.ObjectMapper()
-                .writeValueAsString(dlqEntry);
-            
-            Files.write(filePath, json.getBytes(), 
-                StandardOpenOption.CREATE, 
-                StandardOpenOption.WRITE);
-            
-            log.warn("Failed message written to DLQ file: {}", filePath);
-            
-        } catch (Exception fileException) {
-            log.error("Critical: Failed to write to DLQ file: {}", 
-                fileException.getMessage());
-        }
-    }
+| Purpose | Metric assumed | Source |
+|---|---|---|
+| Partition count | `kafka_topic_partitions` | kafka_exporter |
+| Log end offset | `kafka_topic_partition_current_offset` | kafka_exporter |
+| Log start offset | `kafka_topic_partition_oldest_offset` | kafka_exporter |
+| Replica count | `kafka_topic_partition_replicas` | kafka_exporter |
+| ISR count | `kafka_topic_partition_in_sync_replica` | kafka_exporter |
+| Under-replicated flag | `kafka_topic_partition_under_replicated_partition` | kafka_exporter |
+| Leader broker | `kafka_topic_partition_leader` | kafka_exporter |
+| Preferred leader flag | `kafka_topic_partition_leader_is_preferred` | kafka_exporter |
+| Consumer lag | `kafka_consumergroup_lag` | kafka_exporter |
+| Group committed offset | `kafka_consumergroup_current_offset` | kafka_exporter |
+| Group member count | `kafka_consumergroup_members` | kafka_exporter |
+| Broker count | `kafka_brokers` | kafka_exporter |
+| Messages in | `kafka_server_brokertopicmetrics_messagesin_total` | JMX |
+| Bytes in / out / rejected | `kafka_server_brokertopicmetrics_bytes{in,out,rejected}_total` | JMX |
+| Failed produce / fetch | `kafka_server_brokertopicmetrics_failed{produce,fetch}requests_total` | JMX |
+| Log size | `kafka_log_log_size` | JMX |
+| Cluster under-replicated | `kafka_server_replicamanager_underreplicatedpartitions` | JMX |
+| Offline partitions | `kafka_controller_kafkacontroller_offlinepartitionscount` | JMX |
+| Disk | `node_filesystem_avail_bytes` / `node_filesystem_size_bytes` | node_exporter |
+| Endpoint probe | `probe_success` | blackbox |
+| Cert expiry | `probe_ssl_earliest_cert_expiry` | blackbox |
 
-    @Bean
-    public MessageChannel producerErrorChannel() {
-        return MessageChannels.queue("producerErrorChannel", 500).getObject();
-    }
+If your JMX exporter config emits `kafka_server_BrokerTopicMetrics_MessagesInPerSec`
+style names instead (older configs), the mapping is mechanical — the semantics are
+identical, only the case and the `_total` suffix differ.
 
-    /**
-     * Kafka message handler with enhanced configuration.
-     */
-    @Bean
-    public KafkaProducerMessageHandler<String, SolaceSyslogEvent> kafkaMessageHandler() {
-        KafkaProducerMessageHandler<String, SolaceSyslogEvent> handler = 
-            new KafkaProducerMessageHandler<>(kafkaTemplate());
-        
-        handler.setMessageKeyExpression(new LiteralExpression(APP_NAME));
-        handler.setTopicExpression(new LiteralExpression(kafkaConfig.getTopic()));
-        handler.setSendFailureChannel(producerErrorChannel());
-        handler.setSendTimeout(30000); // 30 seconds
-        handler.setSync(false); // Async sending for better throughput
-        
-        return handler;
-    }
+### 3.2 Labels
 
-    @Bean
-    public KafkaTemplate<String, SolaceSyslogEvent> kafkaTemplate() {
-        KafkaTemplate<String, SolaceSyslogEvent> template = 
-            new KafkaTemplate<>(producerFactory());
-        template.setDefaultTopic(kafkaConfig.getTopic());
-        return template;
-    }
+- **`cluster`** — assumed present on all Kafka metrics. Every query uses
+  `cluster=~"$cluster"` (regex, not equality) so that if the label does *not*
+  exist, `.*` still matches and nothing breaks. Zero-cost insurance.
+- **`team`** — used **only** in the topic dropdown query, not in panel queries.
+  This is deliberate: you only have to attach ownership metadata to the
+  `kafka_topic_partitions` series, not to every metric in the stack.
+- **`topic`, `partition`, `consumergroup`** — standard exporter labels.
 
-    /**
-     * Dead Letter Queue Kafka template.
-     */
-    @Bean
-    public KafkaTemplate<String, Object> deadLetterKafkaTemplate() {
-        return new KafkaTemplate<>(deadLetterProducerFactory());
-    }
+### 3.3 Two placeholders you must edit
 
-    @Bean
-    public ProducerFactory<String, SolaceSyslogEvent> producerFactory() {
-        return new DefaultKafkaProducerFactory<>(producerConfigs());
-    }
+Both are in the platform-health row and are marked in the panel descriptions:
 
-    @Bean
-    public ProducerFactory<String, Object> deadLetterProducerFactory() {
-        Map<String, Object> props = new HashMap<>(producerConfigs());
-        // DLQ can have different settings (e.g., lower throughput, higher reliability)
-        props.put(ACKS_CONFIG, "all");
-        props.put(RETRIES_CONFIG, 3);
-        return new DefaultKafkaProducerFactory<>(props);
-    }
+- **Min broker disk free** — the mountpoint regex
+  `/var/lib/kafka.*|/data.*|/kafka.*`. Set it to your actual log dirs, or the
+  panel will report the OS root filesystem and lie to you.
+- **Bootstrap endpoints / TLS cert expiry** — the matchers
+  `job=~"blackbox.*", instance=~".*kafka.*"`. Point these at your real blackbox
+  targets.
 
-    /**
-     * Enhanced Kafka producer configuration with all critical timeouts.
-     */
-    @Bean
-    public Map<String, Object> producerConfigs() {
-        Map<String, Object> properties = new HashMap<>();
-        
-        // Connection settings
-        properties.put(BOOTSTRAP_SERVERS_CONFIG, kafkaConfig.getBrokers());
-        properties.put(KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        properties.put(VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
-        
-        // CRITICAL TIMEOUT CONFIGURATIONS
-        properties.put(REQUEST_TIMEOUT_MS_CONFIG, 
-            getEnv("KAFKA_REQUEST_TIMEOUT_MS", 30000)); // 30 seconds
-        properties.put(DELIVERY_TIMEOUT_MS_CONFIG, 
-            getEnv("KAFKA_DELIVERY_TIMEOUT_MS", 120000)); // 2 minutes total
-        properties.put(MAX_BLOCK_MS_CONFIG, 
-            getEnv("KAFKA_MAX_BLOCK_MS", 60000)); // 1 minute for send() blocking
-        properties.put(TRANSACTION_TIMEOUT_CONFIG, 
-            getEnv("KAFKA_TRANSACTION_TIMEOUT_MS", 60000)); // 1 minute
-        
-        // Connection resilience
-        properties.put(RECONNECT_BACKOFF_MS_CONFIG, 
-            getEnv("KAFKA_RECONNECT_BACKOFF_MS", 1000)); // 1 second
-        properties.put(RECONNECT_BACKOFF_MAX_MS_CONFIG, 
-            getEnv("KAFKA_RECONNECT_BACKOFF_MAX_MS", 10000)); // 10 seconds max
-        properties.put(CONNECTIONS_MAX_IDLE_MS_CONFIG, 
-            getEnv("KAFKA_CONNECTIONS_MAX_IDLE_MS", 540000)); // 9 minutes
-        
-        // Retry configuration
-        properties.put(RETRIES_CONFIG, 
-            getEnv("KAFKA_RETRIES", Integer.MAX_VALUE));
-        properties.put(RETRY_BACKOFF_MS_CONFIG, 
-            getEnv("KAFKA_RETRY_BACKOFF_MS", 1000)); // 1 second initial
-        
-        // High throughput settings
-        properties.put(LINGER_MS_CONFIG, 
-            getEnv("KAFKA_LINGER_MS", 100)); // 100 ms
-        properties.put(BATCH_SIZE_CONFIG, 
-            getEnv("KAFKA_BATCH_SIZE", 32 * 1024)); // 32 KB
-        properties.put(COMPRESSION_TYPE_CONFIG, 
-            getEnv("KAFKA_COMPRESSION_TYPE", "snappy"));
-        properties.put(ACKS_CONFIG, 
-            getEnv("KAFKA_ACKS", "1")); // Leader acknowledgment
-        
-        // Buffer and memory settings
-        properties.put(BUFFER_MEMORY_CONFIG, 
-            getEnv("KAFKA_BUFFER_MEMORY", 64 * 1024 * 1024L)); // 64MB
-        properties.put(SEND_BUFFER_CONFIG, 
-            getEnv("KAFKA_SEND_BUFFER", 128 * 1024)); // 128KB
-        properties.put(RECEIVE_BUFFER_CONFIG, 
-            getEnv("KAFKA_RECEIVE_BUFFER", 64 * 1024)); // 64KB
-        
-        // In-flight requests
-        properties.put(MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION, 
-            getEnv("KAFKA_MAX_IN_FLIGHT_REQUESTS", 5));
-        
-        // Idempotence (requires acks=all for true idempotence)
-        properties.put(ENABLE_IDEMPOTENCE_CONFIG, 
-            getEnv("KAFKA_ENABLE_IDEMPOTENCE", "false"));
-        
-        // Metadata
-        properties.put(METADATA_MAX_AGE_CONFIG, 
-            getEnv("KAFKA_METADATA_MAX_AGE_MS", 300000)); // 5 minutes
-        properties.put(METADATA_MAX_IDLE_CONFIG, 
-            getEnv("KAFKA_METADATA_MAX_IDLE_MS", 300000)); // 5 minutes
-        
-        // SSL configuration if needed
-        properties.putAll(kafkaConfig.sslConfig());
-        
-        return properties;
-    }
+---
 
-    /**
-     * Retry template for Kafka operations.
-     */
-    @Bean
-    public RetryTemplate kafkaRetryTemplate() {
-        RetryTemplate template = new RetryTemplate();
-        
-        // Exponential backoff
-        ExponentialBackOffPolicy backOffPolicy = new ExponentialBackOffPolicy();
-        backOffPolicy.setInitialInterval(1000); // 1 second
-        backOffPolicy.setMultiplier(2.0);
-        backOffPolicy.setMaxInterval(30000); // Max 30 seconds
-        template.setBackOffPolicy(backOffPolicy);
-        
-        // Retry policy
-        SimpleRetryPolicy retryPolicy = new SimpleRetryPolicy();
-        retryPolicy.setMaxAttempts(5);
-        template.setRetryPolicy(retryPolicy);
-        
-        // Add retry listener for logging
-        template.registerListener(new RetryListener() {
-            @Override
-            public <T, E extends Throwable> void onError(
-                    RetryContext context, RetryCallback<T, E> callback, Throwable throwable) {
-                log.warn("Kafka retry attempt {} failed: {}", 
-                    context.getRetryCount(), throwable.getMessage());
-            }
-        });
-        
-        return template;
-    }
+## 4. The variable model
 
-    /**
-     * Scheduled executor for retries.
-     */
-    @Bean
-    public ScheduledExecutorService kafkaRetryExecutor() {
-        return Executors.newScheduledThreadPool(5, r -> {
-            Thread thread = new Thread(r);
-            thread.setName("kafka-retry-executor");
-            thread.setDaemon(true);
-            return thread;
-        });
-    }
+```
+datasource → cluster → team → topic → consumergroup
+```
 
-    /**
-     * Kafka Health Monitor Component.
-     */
-    @Component
-    @RequiredArgsConstructor
-    public class KafkaHealthMonitor {
-        
-        private final KafkaTemplate<String, SolaceSyslogEvent> kafkaTemplate;
-        private final AtomicBoolean kafkaHealthy = new AtomicBoolean(true);
-        private final AtomicLong lastHealthCheckTime = new AtomicLong(0);
-        
-        @Scheduled(fixedDelay = 30000) // Check every 30 seconds
-        public void checkKafkaHealth() {
-            try {
-                // Create a health check message
-                ProducerRecord<String, SolaceSyslogEvent> healthRecord = 
-                    new ProducerRecord<>("health-check-topic", 
-                        "health-check", null);
-                
-                // Send with timeout
-                ListenableFuture<SendResult<String, SolaceSyslogEvent>> future = 
-                    kafkaTemplate.send(healthRecord);
-                
-                future.get(5, TimeUnit.SECONDS);
-                
-                if (!kafkaHealthy.get()) {
-                    log.info("Kafka connection restored");
-                    kafkaHealthy.set(true);
-                    // Reset circuit breaker if it was open
-                    if (circuitBreakerOpen.get()) {
-                        circuitBreakerOpen.set(false);
-                        consecutiveFailures.set(0);
-                        log.info("Circuit breaker CLOSED after successful health check");
-                    }
-                }
-                
-                lastHealthCheckTime.set(System.currentTimeMillis());
-                
-            } catch (Exception e) {
-                log.error("Kafka health check failed: {}", e.getMessage());
-                kafkaHealthy.set(false);
-                
-                // Consider opening circuit breaker
-                if (consecutiveFailures.get() > CIRCUIT_BREAKER_FAILURE_THRESHOLD / 2) {
-                    openCircuitBreaker();
-                }
-            }
-        }
-        
-        public boolean isKafkaHealthy() {
-            return kafkaHealthy.get();
-        }
-        
-        public long getLastHealthCheckTime() {
-            return lastHealthCheckTime.get();
-        }
-    }
+Chained, in that order. Two choices worth explaining:
 
-    /**
-     * Metrics Reporter for monitoring.
-     */
-    @Component
-    public class KafkaMetricsReporter {
-        
-        @Scheduled(fixedDelay = 60000) // Report every minute
-        public void reportMetrics() {
-            log.info("Kafka Metrics - Success: {}, Failures: {}, DLQ: {}, Circuit Breaker: {}",
-                successCount.get(),
-                failureCount.get(),
-                dlqCount.get(),
-                circuitBreakerOpen.get() ? "OPEN" : "CLOSED");
-            
-            // Reset counters periodically to avoid overflow
-            if (successCount.get() > 1000000) {
-                successCount.set(0);
-                failureCount.set(0);
-                dlqCount.set(0);
-            }
-        }
-    }
+**Team gates the topic list.** On a cluster with thousands of topics, a client
+scrolling an unfiltered dropdown is a bad first impression and a support ticket.
+Internal topics are excluded at the query level with `topic!~"__.*|_confluent.*|_schemas"`
+— note that Grafana's variable regex filter uses RE2, which has no negative
+lookahead, so the exclusion has to live in the PromQL selector, not the regex field.
 
-    // Helper methods for environment variables
-    private static String getEnv(final String envVar, final String defaultValue) {
-        return System.getenv().getOrDefault(envVar, defaultValue);
-    }
+**Consumer group is multi-select and chained off topic.** This is the parameter
+people forget. Lag is meaningless without it — a topic with three consumer groups
+has three different answers to "am I behind", and one healthy group will mask a
+dead one in any summed view.
 
-    private static int getEnv(final String envVar, final int defaultValue) {
-        String value = System.getenv(envVar);
-        return ofNullable(value).map(Integer::parseInt).orElse(defaultValue);
-    }
+---
 
-    private static long getEnv(final String envVar, final long defaultValue) {
-        String value = System.getenv(envVar);
-        return ofNullable(value).map(Long::parseLong).orElse(defaultValue);
-    }
+## 5. Panel reference
 
-    /**
-     * Custom exception for circuit breaker.
-     */
-    public static class CircuitBreakerOpenException extends Exception {
-        public CircuitBreakerOpenException(String message) {
-            super(message);
-        }
-    }
-}
+### Row 1 — At a glance
+
+| Panel | Why it exists |
+|---|---|
+| **Seconds behind** | The headline number. Message-count lag is not comparable across topics; time is. `lag ÷ produce rate`. |
+| Total lag (messages) | The number people ask for, kept because they ask for it. |
+| Produce rate / Consume rate | Side by side, the delta tells you whether lag is growing. |
+| Under-replicated partitions | Scoped to *this* topic — the fastest "not my fault" signal. |
+| **Since last message produced** | Silence detection. Traffic going to zero is the most common real incident and the one that no time-series chart shows well, because a flat line at zero looks like a flat line. |
+
+### Row 2 — Is it me, or is it the platform?
+
+Brokers online · cluster under-replicated · offline partitions · min broker disk ·
+endpoint reachability · TLS cert expiry, plus a text panel stating the decision
+rule explicitly. All green + growing lag = client-side. Anything red = platform-side.
+
+### Row 3 — Producer side
+
+Messages/sec (two independent derivations, offsets and JMX, so a scrape gap is
+visible), bytes in/out/rejected, average message size, fan-out ratio, failed
+requests.
+
+**Average message size** catches schema bloat before it becomes a
+`message.max.bytes` incident. **Fan-out ratio** (bytes out ÷ bytes in) tells a
+client how many consumers are actually reading — a drop toward zero means someone
+stopped; a jump means someone started replaying from the beginning.
+
+### Row 4 — Consumer side
+
+Lag by group, seconds-behind by group, produce-vs-consume on one axis, group member
+count, and a per-partition lag table.
+
+**Produce vs consume on a shared axis** is the most diagnostic chart here. Note it
+is a shared axis, not a dual axis — both series are messages/sec. Dual-axis charts
+are the single most common way to make two unrelated series look correlated, and
+there are none in this dashboard.
+
+**Member count** turns "lag spiked at 3am, why?" into a five-second answer. A dip to
+zero is dead pods; repeated sawtoothing is a rebalance loop, usually
+`max.poll.interval.ms` being exceeded by slow processing.
+
+**Lag by partition** as a sorted table, not a chart. A single stuck partition
+vanishes completely in a summed lag line.
+
+### Row 5 — Partition balance
+
+Message rate and data volume per partition, as bar gauges. Clients never think
+about this and it is the root cause of a large share of "my consumer is slow"
+tickets: a skewed partition key creates one hot partition, which saturates one
+consumer thread while the rest idle. It presents exactly like a capacity problem,
+and adding consumers does not help. Two cheap panels, high hit rate.
+
+### Row 6 — Storage & retention
+
+Topic size (sum across brokers, so it includes replicas — divide by RF for logical
+size), **retention actually achieved**, and projected daily growth.
+
+Retention-achieved is worth calling out: it is computed from real offsets and real
+traffic, so it reflects size-based eviction. It is usually well short of the
+`retention.ms` in the topic config that nobody re-checks, and it is the number that
+matters when a client asks "can I replay yesterday?"
+
+### Rows 7–8 — Replication detail, and a read-me-once methodology panel
+
+Both collapsed by default.
+
+---
+
+## 6. Known limits — broker-side only
+
+Everything here is measured at the broker. That answers "is my topic healthy" and
+"is my consumer keeping up". It cannot answer "why is my producer slow". The broker
+cannot see:
+
+- producer retry rate, batch size, buffer exhaustion, client-observed latency
+- consumer poll duration, processing time, `records-lag-max` from the client's view
+- rebalance counts and durations (member-count dips are a proxy, not the truth)
+- end-to-end produce→consume latency
+
+Adding client-side scraping (JMX exporter sidecar, or Micrometer on the apps) is
+the single biggest upgrade available to this dashboard, and it is the difference
+between a dashboard that diagnoses platform problems and one that diagnoses
+application problems.
+
+### Sampling caveat
+
+`kafka_exporter` polls the cluster on each scrape, so lag is a **snapshot**. At 30s
+scrape intervals and high throughput, lag charts look spiky — that is sampling, not
+your consumer. Never alert on a single sample.
+
+---
+
+## 7. Performance: recording rules
+
+Per-partition, per-group lag series multiply fast. On a large cluster, pre-aggregate
+before this dashboard becomes the reason your Prometheus is slow:
+
+```yaml
+groups:
+  - name: kafka-client-dashboard
+    interval: 30s
+    rules:
+      - record: kafka:consumergroup_lag:sum
+        expr: sum by (cluster, consumergroup, topic) (kafka_consumergroup_lag)
+
+      - record: kafka:topic_produce_rate:sum
+        expr: sum by (cluster, topic) (rate(kafka_topic_partition_current_offset[5m]))
+
+      - record: kafka:consumergroup_consume_rate:sum
+        expr: sum by (cluster, consumergroup, topic) (rate(kafka_consumergroup_current_offset[5m]))
+
+      - record: kafka:consumergroup_seconds_behind
+        expr: |
+          kafka:consumergroup_lag:sum
+            / on (cluster, topic) group_left()
+          clamp_min(kafka:topic_produce_rate:sum, 1)
+
+      - record: kafka:topic_size_bytes:sum
+        expr: sum by (cluster, topic) (kafka_log_log_size)
+```
+
+Then swap the summary panels over to the recorded series. Keep the raw per-partition
+queries only in the drilldown panels, which are viewed rarely.
+
+---
+
+## 8. Suggested client-facing alerts
+
+Alert on the same numbers the dashboard leads with, so an alert always maps to a
+panel. Thresholds are starting points — tune per topic.
+
+| Alert | Condition | Rationale |
+|---|---|---|
+| Consumer falling behind | `kafka:consumergroup_seconds_behind > 300` for 10m | Time, not message count |
+| Consumer stopped | consume rate `== 0` for 10m while produce rate `> 0` | Catches the dead-pod case that lag alone reaches slowly |
+| Topic silent | no produce for 30m on a topic that normally has traffic | The incident nobody alerts on |
+| Rejected messages | `rate(bytesrejected) > 0` for 5m | Always a producer bug |
+| Replay window shrinking | retention-achieved `< 4h` | Warn before the replay budget is gone, not after |
+
+Use `for:` on every one — see the sampling caveat.
+
+---
+
+## 9. Roadmap
+
+**v1.1 — cheap wins on the same data**
+- Team-level overview dashboard: one row per owned topic, health grid, drilldown
+  link into this dashboard with `$topic` pre-set. This is what people will actually
+  bookmark; the topic view is where they land from it.
+- Dashboard links to the platform dashboard and to your topic-request runbook.
+
+**v1.2 — requires client-side metrics**
+- Producer panel: retry rate, batch size, record-send latency, buffer exhaustion.
+- Consumer panel: poll interval, processing time, rebalance rate and duration.
+- End-to-end latency, if apps stamp produce time into headers.
+
+**v1.3 — requires extra collectors**
+- Offset commit freshness and lag *evaluation status* (Burrow, or
+  `kafka-lag-exporter` for a broker-independent time-lag measure).
+- Quota usage per client id, if you enforce quotas — clients cannot currently see
+  when they are being throttled, and throttling looks exactly like a slow consumer.
